@@ -41,6 +41,7 @@
 #include <linux/earlysuspend.h>
 #endif
 //#include <linux/wakelock.h>
+#include <uapi/linux/sched/types.h>
 #include "focaltech_core.h"
 
 /*****************************************************************************
