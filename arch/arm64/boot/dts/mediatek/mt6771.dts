@@ -2193,7 +2193,7 @@ firmware_class.path=/vendor/firmware loop.max_part=7";
 		compatible = "mediatek,mtkfb";
 	};
 
-	dispsys {
+	dispsys: dispsys {
 		compatible = "mediatek,dispsys";
 
 		clocks = <&scpsys SCP_SYS_DIS>,
@@ -4206,8 +4206,14 @@ firmware_class.path=/vendor/firmware loop.max_part=7";
 	subpmic_pmu_eint: mt6370_pmu_eint {
 	};
 
+  /*
 	goodix_fp: fingerprint {
 		compatible = "mediatek,goodix-fp";
+	};
+	*/
+	fingerprint: fingerprint {
+		compatible = "mediatek,fingerprint";
+		phandle = <0xbe>;
 	};
 	
 	finger_proc {
@@ -4290,10 +4296,10 @@ firmware_class.path=/vendor/firmware loop.max_part=7";
 	/* NFC start */
 	nfc:nfc {
 		compatible = "mediatek,nfc-gpio-v2";
-		gpio-rst = <18>;
-		gpio-rst-std = <&pio 18a 0x0>;
-		gpio-irq = <21>;
-		gpio-irq-std = <&pio 21 0x0>;
+		gpio-rst = <19>;
+		gpio-rst-std = <&pio 19 0x0>;
+		gpio-irq = <20>;
+		gpio-irq-std = <&pio 20 0x0>;
 	};
 
 	irq_nfc: irq_nfc {
