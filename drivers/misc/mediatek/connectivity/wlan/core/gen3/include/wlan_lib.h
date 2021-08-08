@@ -37,6 +37,7 @@
 */
 #include "CFG_Wifi_File.h"
 #include "rlm_domain.h"
+#include "queue.h"
 
 /*******************************************************************************
 *                              C O N S T A N T S

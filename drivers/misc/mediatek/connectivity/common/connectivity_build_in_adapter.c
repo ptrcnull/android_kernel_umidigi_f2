@@ -18,7 +18,7 @@
 
 #include "connectivity_build_in_adapter.h"
 
-#include <kernel/sched/sched.h>
+#include <sched/sched.h>
 
 /*device tree mode*/
 #ifdef CONFIG_OF
@@ -269,7 +269,7 @@ EXPORT_SYMBOL(connectivity_export_mmc_io_rw_direct);
 
 void connectivity_export_dump_thread_state(const char *name)
 {
-	static const char stat_nam[] = TASK_STATE_TO_CHAR_STR;
+	static const char stat_nam[] = "RSDTtZXxKWP";
 	struct task_struct *p;
 	int cpu;
 	struct rq *rq;

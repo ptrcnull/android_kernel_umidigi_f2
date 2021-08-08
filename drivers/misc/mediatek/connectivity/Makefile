@@ -16,6 +16,7 @@
 # kernel build system and can use its language.
 ifneq ($(KERNELRELEASE),)
     subdir-ccflags-y += -I$(srctree)
+    subdir-ccflags-y += -I$(srctree)/kernel
     subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/include
     subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/include/clkbuf_v1
     subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/include/clkbuf_v1/$(MTK_PLATFORM)
