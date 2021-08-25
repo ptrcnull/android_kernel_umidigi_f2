@@ -328,6 +328,7 @@ extern struct LCM_DRIVER otm1911a_fhdp_dsi_vdo_truly_rt5081_hdp_lcm_drv;
 extern struct LCM_DRIVER otm1911a_fhdp_dsi_vdo_truly_rt5081_hdp_1560_lcm_drv;
 extern struct LCM_DRIVER td4320_fhdp_dsi_vdo_auo_rt4801_lcm_drv;
 extern struct LCM_DRIVER nt36672a_fhdp_dsi_vdo_auo_lm36273_lcm_drv;
+extern struct LCM_DRIVER ft8719_dsi_fhdplus_drv;
 extern struct LCM_DRIVER ft8719_fhdp_dsi_vdo_auo_lm36273_lcm_drv;
 extern struct LCM_DRIVER sofeg01_fhdplus_dsi_cmd_samsung_lcm_drv;
 extern struct LCM_DRIVER nt36672a_fhdp_dsi_vdo_auo_cphy_lcm_drv;

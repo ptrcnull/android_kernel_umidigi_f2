@@ -1230,6 +1230,9 @@ struct LCM_DRIVER *lcm_driver_list[] = {
 #if defined(NT36672A_FHDP_DSI_VDO_AUO_LM36273)
 	&nt36672a_fhdp_dsi_vdo_auo_lm36273_lcm_drv,
 #endif
+#if defined(FT8719_DSI_FHDPLUS)
+    &ft8719_dsi_fhdplus_drv,
+#endif
 #if defined(FT8719_FHDP_DSI_VDO_AUO_LM36273)
 	&ft8719_fhdp_dsi_vdo_auo_lm36273_lcm_drv,
 #endif
