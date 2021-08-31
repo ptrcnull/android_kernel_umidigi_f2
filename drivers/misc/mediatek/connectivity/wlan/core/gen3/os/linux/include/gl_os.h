@@ -26,6 +26,8 @@
  *  also list down here.
  */
 
+#include <queue.h>
+
 #ifndef _GL_OS_H
 #define _GL_OS_H
 
