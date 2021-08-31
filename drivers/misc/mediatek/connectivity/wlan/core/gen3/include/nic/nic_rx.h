@@ -551,6 +551,9 @@ struct _SW_RFB_T {
 	/* rx sta record */
 	UINT_8 ucWlanIdx;
 	UINT_8 ucStaRecIdx;
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+	UINT_8 fgIsFirstSubAMSDULLCMS;
+#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
 
 	BOOLEAN fgReorderBuffer;
 	BOOLEAN fgDataFrame;
@@ -616,6 +619,10 @@ typedef struct _EMU_MAC_RATE_INFO_T {
 	UINT_32 u4PhyRate[4][2];
 } EMU_MAC_RATE_INFO_T, *P_EMU_MAC_RATE_INFO_T;
 
+struct ACTION_FRAME_SIZE_MAP {
+	UINT_16 u2Index; /* High byte for Action, low byte for Category */
+	size_t len;
+};
 /*******************************************************************************
 *                           P R I V A T E   D A T A
 ********************************************************************************
@@ -897,4 +904,7 @@ WLAN_STATUS nicRxFlush(IN P_ADAPTER_T prAdapter);
 WLAN_STATUS nicRxProcessActionFrame(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfb);
 
 VOID nicRxMgmtNoWTBLHandling(P_ADAPTER_T prAdapter, P_SW_RFB_T prSwRfb);
+
+VOID nicRxClearFrag(IN P_ADAPTER_T prAdapter, IN P_STA_RECORD_T prStaRec);
+
 #endif /* _NIC_RX_H */

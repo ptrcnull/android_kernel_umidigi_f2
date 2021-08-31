@@ -541,6 +541,9 @@ wlanoidSetBssidListScan(IN P_ADAPTER_T prAdapter,
 		       "Fail in set BSSID list scan! (Adapter not ready). ACPI=D%d, Radio=%d\n",
 		       prAdapter->rAcpiState, prAdapter->fgIsRadioOff);
 		return WLAN_STATUS_ADAPTER_NOT_READY;
+	} else if (prAdapter->fgTestMode) {
+		DBGLOG(OID, WARN, "didn't support Scan in test mode\n");
+		return WLAN_STATUS_FAILURE;
 	}
 
 	ASSERT(pu4SetInfoLen);
@@ -705,6 +708,9 @@ wlanoidSetBssidListScanAdv(IN P_ADAPTER_T prAdapter,
 		       "Fail in set BSSID list scan! (Adapter not ready). ACPI=D%d, Radio=%d\n",
 		       prAdapter->rAcpiState, prAdapter->fgIsRadioOff);
 		return WLAN_STATUS_ADAPTER_NOT_READY;
+	} else if (prAdapter->fgTestMode) {
+		DBGLOG(OID, WARN, "didn't support Scan in test mode\n");
+		return WLAN_STATUS_FAILURE;
 	}
 
 	ASSERT(pu4SetInfoLen);
@@ -1215,6 +1221,49 @@ wlanoidSetConnect(IN P_ADAPTER_T prAdapter, IN PVOID pvSetBuffer, IN UINT_32 u4S
 	return WLAN_STATUS_SUCCESS;
 }				/* end of wlanoidSetConnect */
 
+#if CFG_SUPPORT_CFG80211_AUTH
+WLAN_STATUS
+wlanoidSendAuthAssoc(IN P_ADAPTER_T prAdapter,
+		IN PVOID pvSetBuffer, IN UINT_32 u4SetBufferLen,
+		OUT PUINT_32 pu4SetInfoLen)
+{
+	P_STA_RECORD_T prStaRec = NULL;
+	P_UINT_8 pAddr;
+
+	if (!prAdapter || !pu4SetInfoLen) {
+		DBGLOG(REQ, WARN, "prAdapter or SetInfoLen is NULL!\n");
+		return WLAN_STATUS_INVALID_DATA;
+	}
+
+	*pu4SetInfoLen = MAC_ADDR_LEN;
+	if (u4SetBufferLen != MAC_ADDR_LEN) {
+		*pu4SetInfoLen = MAC_ADDR_LEN;
+		return WLAN_STATUS_INVALID_LENGTH;
+	} else if (prAdapter->rAcpiState == ACPI_STATE_D3) {
+		DBGLOG(REQ, WARN, "Failed because adapter not ready!\n");
+		return WLAN_STATUS_ADAPTER_NOT_READY;
+	}
+
+	pAddr = (P_UINT_8) pvSetBuffer;
+
+	DBGLOG(REQ, INFO, "try to find sta ["MACSTR"]\n", MAC2STR(pAddr));
+	/* skip join initial flow
+	 * when it has been completed with the same auth parameters
+	 */
+	prStaRec = cnmGetStaRecByAddress(prAdapter,
+		prAdapter->prAisBssInfo->ucBssIndex,
+		pAddr);
+
+	if (prStaRec)
+		saaSendAuthAssoc(prAdapter, prStaRec);
+	else
+		DBGLOG(REQ, WARN,
+			"can't send auth since can't find StaRec\n");
+
+	return WLAN_STATUS_SUCCESS;
+}
+#endif
+
 /*----------------------------------------------------------------------------*/
 /*!
 * \brief This routine is called to query the currently associated SSID.
@@ -1591,6 +1640,8 @@ wlanoidSetAuthMode(IN P_ADAPTER_T prAdapter,
 	case AUTH_MODE_WPA_PSK:
 	case AUTH_MODE_WPA2:
 	case AUTH_MODE_WPA2_PSK:
+	case AUTH_MODE_WPA2_FT:
+	case AUTH_MODE_WPA2_FT_PSK:
 		/* infrastructure mode only */
 		if (prAdapter->rWifiVar.rConnSettings.eOPMode != NET_TYPE_INFRA)
 			return WLAN_STATUS_NOT_ACCEPTED;
@@ -2321,6 +2372,10 @@ wlanoidSetAddKey(IN P_ADAPTER_T prAdapter, IN PVOID pvSetBuffer, IN UINT_32 u4Se
 			DBGLOG(REQ, INFO, "[wlan] Not set the peer key while disconnect\n");
 			return WLAN_STATUS_SUCCESS;
 		}
+#if CFG_SUPPORT_FRAG_ATTACK_DETECTION
+		/* clear fragment cache when rekey */
+		nicRxClearFrag(prAdapter, prStaRec);
+#endif
 	}
 
 	prCmdInfo = cmdBufAllocateCmdInfo(prAdapter, (CMD_HDR_SIZE + sizeof(CMD_802_11_KEY)));
@@ -4267,6 +4322,54 @@ wlanoidQueryStatistics(IN P_ADAPTER_T prAdapter,
 				   pvQueryBuffer, u4QueryBufferLen);
 
 }				/* wlanoidQueryStatistics */
+
+WLAN_STATUS
+wlanoidQueryTemperature(IN P_ADAPTER_T prAdapter,
+			  IN PVOID pvQueryBuffer, IN UINT_32 u4QueryBufferLen,
+			  OUT PUINT_32 pu4QueryInfoLen)
+{
+	WLAN_STATUS rResult = WLAN_STATUS_FAILURE;
+	struct EVENT_TEMPERATURE_T temp;
+
+	DEBUGFUNC("wlanoidQuerytemperature");
+
+	if (prAdapter == NULL)
+		return WLAN_STATUS_FAILURE;
+
+	if (prAdapter->fgIsEnableLpdvt)
+		return WLAN_STATUS_NOT_SUPPORTED;
+
+	do {
+		ASSERT(pvQueryBuffer);
+
+		/*1. Sanity test */
+		if (pu4QueryInfoLen == NULL)
+			break;
+
+		if ((u4QueryBufferLen) && (pvQueryBuffer == NULL))
+			break;
+
+		if (u4QueryBufferLen < sizeof(UINT_8)) {
+			*pu4QueryInfoLen = sizeof(UINT_8);
+			rResult = WLAN_STATUS_BUFFER_TOO_SHORT;
+			break;
+		}
+
+		rResult = wlanSendSetQueryCmd(prAdapter,
+			      CMD_ID_GET_TEMPERATURE,
+			      FALSE,
+			      TRUE,
+			      TRUE,
+			      nicCmdEventQueryTemperature,
+			      nicOidCmdTimeoutCommon,
+			      sizeof(temp),
+			      (PUINT_8)&temp,
+			      pvQueryBuffer, u4QueryBufferLen);
+
+	} while (FALSE);
+
+	return rResult;
+}
 
 /*----------------------------------------------------------------------------*/
 /*! \brief  This routine is called to query current media streaming status.
@@ -7695,9 +7798,11 @@ wlanoidSetAcpiDevicePowerState(IN P_ADAPTER_T prAdapter,
 		break;
 	case ParamDeviceStateD1:
 		DBGLOG(REQ, INFO, "Set Power State: D1\n");
+		/* FALLTHRU */
 		/* no break here */
 	case ParamDeviceStateD2:
 		DBGLOG(REQ, INFO, "Set Power State: D2\n");
+		/* FALLTHRU */
 		/* no break here */
 	case ParamDeviceStateD3:
 		DBGLOG(REQ, INFO, "Set Power State: D3\n");
@@ -7888,14 +7993,43 @@ WLAN_STATUS
 wlanoidSetDisassociate(IN P_ADAPTER_T prAdapter,
 		       IN PVOID pvSetBuffer, IN UINT_32 u4SetBufferLen, OUT PUINT_32 pu4SetInfoLen)
 {
+	P_GLUE_INFO_T prGlueInfo;
 	P_MSG_AIS_ABORT_T prAisAbortMsg;
-
+	BOOLEAN bReportAssocTimeout = FALSE;
 	DEBUGFUNC("wlanoidSetDisassociate");
 
 	ASSERT(prAdapter);
 	ASSERT(pu4SetInfoLen);
 
+	prGlueInfo = prAdapter->prGlueInfo;
 	*pu4SetInfoLen = 0;
+
+	if (pvSetBuffer)
+		bReportAssocTimeout = *(BOOLEAN *)pvSetBuffer;
+
+	if (bReportAssocTimeout) {
+#if CFG_SUPPORT_CFG80211_AUTH
+		/* The BSS from cfg80211_ops.assoc must give back to
+		 * cfg80211_send_rx_assoc() or to cfg80211_assoc_timeout().
+		 * To ensure proper refcounting, new association requests
+		 * while already associating must be rejected.
+		 */
+		if (prGlueInfo->prAdapter->rWifiVar.rConnSettings.bss) {
+			DBGLOG(REQ, INFO, "assoc timeout notify\n");
+			/* ops caller have already hold the mutex. */
+#if (KERNEL_VERSION(3, 11, 0) <= CFG80211_VERSION_CODE)
+			cfg80211_assoc_timeout(prGlueInfo->prDevHandler,
+				prGlueInfo->prAdapter->rWifiVar.rConnSettings.bss);
+#else
+			cfg80211_send_assoc_timeout(prGlueInfo->prDevHandler,
+				prGlueInfo->prAdapter->rWifiVar.
+					rConnSettings.bss->bssid);
+#endif
+			DBGLOG(REQ, INFO, "assoc timeout notify, Done\n");
+			prGlueInfo->prAdapter->rWifiVar.rConnSettings.bss = NULL;
+		}
+#endif
+	}
 
 	if (prAdapter->rAcpiState == ACPI_STATE_D3) {
 		DBGLOG(REQ, WARN,
@@ -10492,6 +10626,75 @@ wlanoidSetCountryCode(IN P_ADAPTER_T prAdapter,
 	return WLAN_STATUS_SUCCESS;
 }
 
+WLAN_STATUS
+wlanoidSet5gEnable(IN P_ADAPTER_T prAdapter,
+			IN PVOID pvSetBuffer,
+			IN UINT_32 u4SetBufferLen,
+			OUT PUINT_32 pu4SetInfoLen)
+{
+	UINT_32 enable;
+	UINT_8 ucBssIndex;
+	P_BSS_INFO_T prAisBssInfo = NULL;
+	P_AIS_FSM_INFO_T prAisFsmInfo = NULL;
+	P_CONNECTION_SETTINGS_T prConnSettings = NULL;
+
+	ASSERT(prAdapter);
+	ASSERT(pvSetBuffer);
+
+	*pu4SetInfoLen = sizeof(UINT_32);
+
+	if (u4SetBufferLen < sizeof(UINT_32))
+		return WLAN_STATUS_INVALID_LENGTH;
+
+	enable = *((PUINT_32)pvSetBuffer);
+	DBGLOG(INIT, INFO, "set 5G enable %d.\n", enable);
+
+	ucBssIndex = wlanGetAisBssIndex(prAdapter);
+	prAisBssInfo = prAdapter->prAisBssInfo;
+	prAisFsmInfo = &(prAdapter->rWifiVar.rAisFsmInfo);
+
+	/* if driver has been set enable or disable */
+	/* the same set value directly do nothing */
+	if (enable == 1 && prAdapter->fg5gDisable != FALSE) {
+		prAdapter->aePreferBand[ucBssIndex] = BAND_NULL;
+		prAdapter->fg5gDisable = FALSE;
+	} else if (enable == 0 && prAdapter->fg5gDisable != TRUE) {
+		prAdapter->aePreferBand[ucBssIndex] = BAND_2G4;
+		prAdapter->fg5gDisable = TRUE;
+
+		if (prAisBssInfo->eBand == BAND_5G) {
+			DBGLOG(INIT, INFO,
+				"Adapt disconnect when disable 5G\n");
+			aisFsmStateAbort(prAdapter,
+					DISCONNECT_REASON_CODE_RADIO_LOST,
+					FALSE);
+			/* clear scan result */
+			prAdapter->rWlanInfo.u4ScanResultNum = 0;
+			prAdapter->rWlanInfo.u4ScanIEBufferUsage = 0;
+
+			prConnSettings = &(prAdapter->rWifiVar.rConnSettings);
+			prConnSettings->fgIsConnReqIssued = FALSE;
+		} else {
+			if ((prAisFsmInfo->eCurrentState == AIS_STATE_SCAN) ||
+					(prAisFsmInfo->eCurrentState ==
+						AIS_STATE_ONLINE_SCAN) ||
+					(prAisFsmInfo->eCurrentState ==
+						AIS_STATE_LOOKING_FOR)) {
+				DBGLOG(INIT, INFO, "Abort scan\n");
+				aisFsmStateAbort_SCAN(prAdapter);
+			}
+			wlanClearScanningResult(prAdapter);
+		}
+	} else {
+		DBGLOG(INIT, STATE,
+			"device is already 5G %s, set value is %s\n",
+			prAdapter->fg5gDisable ? "disable" : "enable",
+			enable ? "enable" : "disable");
+	}
+
+	return WLAN_STATUS_SUCCESS;
+}
+
 #if 0
 WLAN_STATUS
 wlanoidSetNoaParam(IN P_ADAPTER_T prAdapter,
@@ -11262,6 +11465,7 @@ wlanoidSetGtkRekeyData(IN P_ADAPTER_T prAdapter,
 
 }				/* wlanoidSetGtkRekeyData */
 
+#if CFG_SUPPORT_SCHED_SCAN
 /*----------------------------------------------------------------------------*/
 /*!
 * \brief This routine is called to request starting of schedule scan
@@ -11316,11 +11520,7 @@ wlanoidSetStartSchedScan(IN P_ADAPTER_T prAdapter,
 
 	prSchedScanRequest = (P_PARAM_SCHED_SCAN_REQUEST) pvSetBuffer;
 
-	if (scnFsmSchedScanRequest(prAdapter,
-				   (UINT_8) (prSchedScanRequest->u4SsidNum),
-				   prSchedScanRequest->arSsid,
-				   prSchedScanRequest->u4IELength,
-				   prSchedScanRequest->pucIE, prSchedScanRequest->u2ScanInterval) == TRUE)
+	if (scnFsmSchedScanRequest(prAdapter, prSchedScanRequest) == TRUE)
 		return WLAN_STATUS_PENDING;
 	else
 		return WLAN_STATUS_FAILURE;
@@ -11358,6 +11558,8 @@ wlanoidSetStopSchedScan(IN P_ADAPTER_T prAdapter,
 	else
 		return WLAN_STATUS_FAILURE;
 }
+#endif
+
 
 #if CFG_M0VE_BA_TO_DRIVER
 /*----------------------------------------------------------------------------*/
@@ -12267,6 +12469,57 @@ wlanoidNotifyFwSuspend(
 					NULL,
 					0);
 }
+
+WLAN_STATUS
+wlanoidPacketKeepAlive(IN P_ADAPTER_T prAdapter,
+		IN PVOID pvSetBuffer,
+		IN UINT_32 u4SetBufferLen,
+		OUT PUINT_32 pu4SetInfoLen) {
+	WLAN_STATUS rStatus = WLAN_STATUS_SUCCESS;
+	struct PARAM_PACKET_KEEPALIVE_T *prPacket;
+
+	DEBUGFUNC("wlanoidPacketKeepAlive");
+	ASSERT(prAdapter);
+	ASSERT(pu4SetInfoLen);
+	if (u4SetBufferLen)
+		ASSERT(pvSetBuffer);
+
+	*pu4SetInfoLen = sizeof(struct PARAM_PACKET_KEEPALIVE_T);
+
+	/* Check for query buffer length */
+	if (u4SetBufferLen < *pu4SetInfoLen) {
+		DBGLOG(OID, WARN, "Too short length %u\n", u4SetBufferLen);
+		return WLAN_STATUS_BUFFER_TOO_SHORT;
+	}
+
+	prPacket = (struct PARAM_PACKET_KEEPALIVE_T *)
+		kalMemAlloc(sizeof(struct PARAM_PACKET_KEEPALIVE_T),
+				VIR_MEM_TYPE);
+	if (!prPacket) {
+		DBGLOG(OID, ERROR,
+		       "Can not alloc memory for struct PARAM_PACKET_KEEPALIVE_T\n");
+		return -ENOMEM;
+	}
+	kalMemCopy(prPacket, pvSetBuffer,
+		sizeof(struct PARAM_PACKET_KEEPALIVE_T));
+
+	DBGLOG(OID, INFO, "enable=%d, index=%d\r\n",
+		prPacket->enable, prPacket->index);
+
+	rStatus = wlanSendSetQueryCmd(prAdapter,
+				CMD_ID_WFC_KEEP_ALIVE,
+				TRUE,
+				FALSE,
+				g_fgIsOid,
+				nicCmdEventSetCommon,
+				nicOidCmdTimeoutCommon,
+				sizeof(struct PARAM_PACKET_KEEPALIVE_T),
+				(uint8_t *)prPacket, NULL, 0);
+	kalMemFree(prPacket, VIR_MEM_TYPE,
+		sizeof(struct PARAM_PACKET_KEEPALIVE_T));
+	return rStatus;
+}
+
 #if CFG_SUPPORT_DBDC
 WLAN_STATUS
 wlanoidSetDbdcEnable(
@@ -12669,3 +12922,22 @@ wlanoidConfigRoaming(IN P_ADAPTER_T prAdapter,
 
 	return WLAN_STATUS_SUCCESS;
 }
+
+WLAN_STATUS
+wlanoidAbortScan(IN P_ADAPTER_T prAdapter,
+		 IN PVOID pvQueryBuffer, IN UINT_32 u4QueryBufferLen,
+		 OUT PUINT_32 pu4QueryInfoLen) {
+
+	P_AIS_FSM_INFO_T prAisFsmInfo = (P_AIS_FSM_INFO_T) NULL;
+
+	ASSERT(prAdapter);
+
+	prAisFsmInfo = &(prAdapter->rWifiVar.rAisFsmInfo);
+	if (prAisFsmInfo->eCurrentState == AIS_STATE_SCAN ||
+	    prAisFsmInfo->eCurrentState == AIS_STATE_ONLINE_SCAN) {
+		DBGLOG(OID, INFO,  "wlanoidAbortScan\n");
+		aisFsmStateAbort_SCAN(prAdapter);
+	}
+	return WLAN_STATUS_SUCCESS;
+}
+

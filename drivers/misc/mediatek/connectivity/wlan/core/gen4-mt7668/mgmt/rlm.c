@@ -2168,7 +2168,10 @@ static UINT_8 rlmRecIeInfoForClient(P_ADAPTER_T prAdapter, P_BSS_INFO_T prBssInf
 
 			DBGLOG(RLM, INFO, "[Ch] Count=%d\n", prChannelSwitchAnnounceIE->ucChannelSwitchCount);
 
-			if (prChannelSwitchAnnounceIE->ucChannelSwitchMode == 1) {
+			if (prChannelSwitchAnnounceIE->
+					ucChannelSwitchMode == 1
+				|| prChannelSwitchAnnounceIE->
+					ucChannelSwitchCount <= 3) {
 				/* Need to stop data transmission immediately */
 				fgHasChannelSwitchIE = TRUE;
 				if (!g_fgHasStopTx) {
@@ -2181,14 +2184,18 @@ static UINT_8 rlmRecIeInfoForClient(P_ADAPTER_T prAdapter, P_BSS_INFO_T prBssInf
 					qmSetStaRecTxAllowed(prAdapter, prStaRec, FALSE);
 					DBGLOG(RLM, EVENT, "[Ch] TxAllowed = FALSE\n");
 				}
-
-				if (prChannelSwitchAnnounceIE->ucChannelSwitchCount <= 3) {
-					DBGLOG(RLM, INFO,
-					       "[Ch] switch channel [%d]->[%d]\n", prBssInfo->ucPrimaryChannel,
-					       prChannelSwitchAnnounceIE->ucNewChannelNum);
-					ucChannelAnnouncePri = prChannelSwitchAnnounceIE->ucNewChannelNum;
-					fgNeedSwitchChannel = TRUE;
-				}
+			}
+			if (prChannelSwitchAnnounceIE->
+					ucChannelSwitchCount <= 3) {
+				DBGLOG(RLM, INFO,
+				       "[Ch] switch channel [%d]->[%d]\n",
+				       prBssInfo->ucPrimaryChannel,
+				       prChannelSwitchAnnounceIE->
+				       ucNewChannelNum);
+				ucChannelAnnouncePri =
+					prChannelSwitchAnnounceIE->
+					ucNewChannelNum;
+				fgNeedSwitchChannel = TRUE;
 			}
 
 			break;
@@ -3785,7 +3792,10 @@ VOID rlmProcessSpecMgtAction(P_ADAPTER_T prAdapter, P_SW_RFB_T prSwRfb)
 
 				prChannelSwitchAnnounceIE = (P_IE_CHANNEL_SWITCH_T) pucIE;
 
-				if (prChannelSwitchAnnounceIE->ucChannelSwitchMode == 1) {
+				if (prChannelSwitchAnnounceIE->
+						ucChannelSwitchMode == 1
+					|| prChannelSwitchAnnounceIE->
+						ucChannelSwitchCount <= 3) {
 					/* Need to stop data transmission immediately */
 					if (!g_fgHasStopTx) {
 						g_fgHasStopTx = TRUE;
@@ -3797,18 +3807,19 @@ VOID rlmProcessSpecMgtAction(P_ADAPTER_T prAdapter, P_SW_RFB_T prSwRfb)
 						qmSetStaRecTxAllowed(prAdapter, prStaRec, FALSE);
 						DBGLOG(RLM, EVENT, "[Ch] TxAllowed = FALSE\n");
 					}
+				}
 
-					if (prChannelSwitchAnnounceIE->ucChannelSwitchCount <= 3) {
-						DBGLOG(RLM, INFO,
-						       "[Mgt Action] switch channel [%d]->[%d]\n",
-							prBssInfo->ucPrimaryChannel,
-							prChannelSwitchAnnounceIE->ucNewChannelNum);
-						prBssInfo->ucPrimaryChannel =
-							prChannelSwitchAnnounceIE->ucNewChannelNum;
-						fgNeedSwitchChannel = TRUE;
-					}
-				} else {
-					DBGLOG(RLM, INFO, "[Mgt Action] ucChannelSwitchMode = 0\n");
+				if (prChannelSwitchAnnounceIE->
+						ucChannelSwitchCount <= 3) {
+					DBGLOG(RLM, INFO,
+					       "[Mgt Action] switch channel [%d]->[%d]\n",
+						prBssInfo->ucPrimaryChannel,
+						prChannelSwitchAnnounceIE->
+						ucNewChannelNum);
+					prBssInfo->ucPrimaryChannel =
+						prChannelSwitchAnnounceIE->
+						ucNewChannelNum;
+					fgNeedSwitchChannel = TRUE;
 				}
 
 				fgHasChannelSwitchIE = TRUE;
@@ -4598,4 +4609,65 @@ rlmClientSupportsHtETxBF(P_STA_RECORD_T prStaRec)
 	return (u4RxNDPCap == 1) && (u4ComBfFbkCap > 0);
 }
 
+#endif
+
+/*----------------------------------------------------------------------------*/
+/*!
+* \brief
+*
+* \param[in]
+*
+* \return none
+*/
+/*----------------------------------------------------------------------------*/
+#if CFG_SUPPORT_WAC
+UINT_32 rlmCalculateWAC_IELen(IN P_ADAPTER_T prAdapter, IN UINT_8 ucBssIdx,
+				IN P_STA_RECORD_T prStaRec)
+{
+	UINT_32 u4IELen = 0;
+
+	do {
+		ASSERT_BREAK((prAdapter != NULL) && (ucBssIdx < BSS_INFO_NUM));
+
+		if (!prAdapter->rWifiVar.fgEnableWACIE) {
+			DBGLOG(RLM, ERROR, "WAC IE disabled, return len=0.\n");
+			return 0;
+			}
+
+		if (!prAdapter->fgIsP2PRegistered)
+			break;
+
+		/*WAC IE will in Bea Pro Resp Frame softAP*/
+		if (!p2pFuncIsAPMode((IN P_P2P_CONNECTION_SETTINGS_T)
+				prAdapter->rWifiVar.prP2PConnSettings))
+			break;
+
+		u4IELen = prAdapter->rWifiVar.u2WACIELen;
+	} while (FALSE);
+
+	DBGLOG(RLM, ERROR, "WAC IE len=%d.\n");
+	return u4IELen;
+}
+
+VOID rlmGenerateWAC_IE(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMsduInfo)
+{
+	PUINT_8 pucIEBuf = (PUINT_8) NULL;
+
+	do {
+		ASSERT_BREAK((prAdapter != NULL) && (prMsduInfo != NULL));
+
+		if (!prAdapter->rWifiVar.fgEnableWACIE) {
+			DBGLOG(RLM, ERROR, "WAC IE disabled, return null.\n");
+			return;
+			}
+
+		DBGLOG(RLM, ERROR, "WACIE:len=%d\n",
+			prAdapter->rWifiVar.u2WACIELen);
+		pucIEBuf = (PUINT_8) ((ULONG) prMsduInfo->prPacket +
+					(ULONG) prMsduInfo->u2FrameLength);
+		kalMemCopy(pucIEBuf, prAdapter->rWifiVar.aucWACIECache,
+				prAdapter->rWifiVar.u2WACIELen);
+		prMsduInfo->u2FrameLength += prAdapter->rWifiVar.u2WACIELen;
+	} while (FALSE);
+}
 #endif

@@ -244,6 +244,9 @@
 /* Enable A-MSDU RX Reordering Support */
 #define CFG_SUPPORT_RX_AMSDU	1
 
+/* Enable Detection for 2021 Frag/AGG Attack from WFA */
+#define CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION 1
+
 /* Enable Android wake_lock operations */
 #ifndef CFG_ENABLE_WAKE_LOCK
 #define CFG_ENABLE_WAKE_LOCK	1
@@ -694,6 +697,8 @@
 #define CFG_HOTSPOT_OPTIMIZATION_BEACON_INTERVAL 300
 #define CFG_HOTSPOT_OPTIMIZATION_DTIM           1
 #define CFG_AUTO_CHANNEL_SEL_SUPPORT            1
+
+#define CFG_SUPPORT_SOFTAP_WPA3	1
 
 #ifndef CFG_ENABLE_UNIFY_WIPHY
 #define CFG_ENABLE_UNIFY_WIPHY 1

@@ -281,6 +281,13 @@ wlanoidSetAddP2PKey(IN P_ADAPTER_T prAdapter,
 		prStaRec = cnmGetStaRecByAddress(prAdapter, rCmdKey.ucBssIdx, rCmdKey.aucPeerAddr);
 	}
 
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+	if (rCmdKey.ucKeyType && prStaRec) {
+		/* clear fragment cache when p2p rekey. */
+		nicRxClearFrag(prAdapter, prStaRec);
+	}
+#endif
+
 	if (rCmdKey.ucTxKey) {
 		if (prStaRec) {
 			if (rCmdKey.ucKeyType) {	/* RSN STA */

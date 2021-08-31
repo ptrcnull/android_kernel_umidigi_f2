@@ -554,6 +554,19 @@ typedef enum _ENUM_WMM_ACI_T {
 	WMM_AC_INDEX_NUM
 } ENUM_WMM_ACI_T, *P_ENUM_WMM_ACI_T;
 
+/* WMM QOS user priority from 802.1D/802.11e */
+enum ENUM_WMM_UP_T {
+	WMM_UP_BE_INDEX = 0,
+	WMM_UP_BK_INDEX,
+	WMM_UP_RESV_INDEX,
+	WMM_UP_EE_INDEX,
+	WMM_UP_CL_INDEX,
+	WMM_UP_VI_INDEX,
+	WMM_UP_VO_INDEX,
+	WMM_UP_NC_INDEX,
+	WMM_UP_INDEX_NUM
+};
+
 /* Used for CMD Queue Operation */
 typedef enum _ENUM_FRAME_ACTION_T {
 	FRAME_ACTION_DROP_PKT = 0,
@@ -875,6 +888,11 @@ UINT_32 qmGetRxReorderQueuedBufferCount(IN P_ADAPTER_T prAdapter);
 VOID qmHandleReorderBubbleTimeout(IN P_ADAPTER_T prAdapter, IN ULONG ulParamPtr);
 VOID qmHandleEventCheckReorderBubble(IN P_ADAPTER_T prAdapter, IN P_WIFI_EVENT_T prEvent);
 VOID qmHandleMissTimeout(IN P_RX_BA_ENTRY_T prReorderQueParm);
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+u_int8_t qmDetectRxInvalidEAPOL(IN P_ADAPTER_T prAdapter,
+	IN P_SW_RFB_T prSwRfb);
+
+#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
 
 #if ARP_MONITER_ENABLE
 VOID qmDetectArpNoResponse(P_ADAPTER_T prAdapter, P_MSDU_INFO_T prMsduInfo);

@@ -33,7 +33,6 @@
 
 #include "osal.h"
 #include "connectivity_build_in_adapter.h"
-#include <linux/sched/clock.h>
 
 /*******************************************************************************
 *                              C O N S T A N T S

@@ -662,6 +662,7 @@ typedef struct _WIFI_VAR_T {
 	UINT_16 u2MediatekOuiIELen;
 
 	/* Feature Options */
+	UINT_8 fgDisRoaming;
 	UINT_8 ucQoS;
 
 	UINT_8 aucAifsN[WMM_AC_INDEX_NUM];

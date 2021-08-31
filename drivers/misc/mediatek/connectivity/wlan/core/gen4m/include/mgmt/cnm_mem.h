@@ -214,7 +214,12 @@ struct SEC_INFO {
 
 /* Fragment information structure */
 struct FRAG_INFO {
-	uint16_t u2NextFragSeqCtrl;
+	uint16_t u2SeqNo;
+	uint8_t ucNextFragNo;
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+	uint8_t ucSecMode;
+	uint64_t u8NextPN;
+#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
 	uint8_t *pucNextFragStart;
 	struct SW_RFB *pr1stFrag;
 
@@ -236,6 +241,7 @@ struct STA_PMF_CFG {
 	u_int8_t fgMfpc;
 	u_int8_t fgMfpr;
 	u_int8_t fgSha256;
+	u_int8_t fgSaeRequireMfp;
 	u_int8_t fgApplyPmf;
 	u_int8_t fgBipKeyInstalled;
 
@@ -250,24 +256,6 @@ struct STA_PMF_CFG {
 	uint8_t ucSAQueryTimedOut;	/* retry more than 1000ms */
 	struct TIMER rSAQueryTimer;
 	uint16_t u2TransactionID;
-};
-#endif
-
-#if DSCP_SUPPORT
-struct _DSCP_EXCEPTION {
-	uint8_t dscp;
-	uint8_t userPriority;
-};
-
-struct _DSCP_RANGE {
-	uint8_t lDscp;
-	uint8_t hDscp;
-};
-
-struct _QOS_MAP_SET {
-	struct _DSCP_RANGE dscpRange[8];
-	uint8_t dscpExceptionNum;
-	struct _DSCP_EXCEPTION dscpException[1];
 };
 #endif
 
@@ -497,6 +485,11 @@ struct STA_RECORD {
 
 	u_int8_t afgIsIgnoreAmsduDuplicate[TID_NUM + 1];
 
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+	uint16_t au2AmsduInvalidSN[TID_NUM + 1];
+	u_int8_t afgIsAmsduInvalid[TID_NUM + 1];
+#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
+
 #if 0
 	/* RXM */
 	struct RX_BA_ENTRY *aprRxBaTable[TID_NUM];
@@ -635,6 +628,7 @@ struct STA_RECORD {
 
 	/* Reorder Parameter reference table */
 	struct RX_BA_ENTRY *aprRxReorderParamRefTbl[CFG_RX_MAX_BA_TID_NUM];
+
 #endif
 
 #if CFG_SUPPORT_802_11V_TIMING_MEASUREMENT
@@ -694,7 +688,7 @@ struct STA_RECORD {
 	struct STA_PMF_CFG rPmfCfg;
 #endif
 #if DSCP_SUPPORT
-	struct _QOS_MAP_SET *qosMapSet;
+	uint8_t  qosMapSet[64];
 #endif
 	u_int8_t fgSupportBTM; /* Indicates whether to support BTM */
 

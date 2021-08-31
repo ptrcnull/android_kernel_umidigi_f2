@@ -316,6 +316,11 @@ VOID aisFsmInit(IN P_ADAPTER_T prAdapter)
 			  (PFN_MGMT_TIMEOUT_FUNC) aisFsmRunEventJoinTimeout, (ULONG) NULL);
 
 	cnmTimerInitTimer(prAdapter,
+			  &prAisFsmInfo->rChannelTimeoutTimer,
+			  (PFN_MGMT_TIMEOUT_FUNC) aisFsmRunEventChannelTimeout,
+				(unsigned long) NULL);
+
+	cnmTimerInitTimer(prAdapter,
 			  &prAisFsmInfo->rDeauthDoneTimer,
 			  (PFN_MGMT_TIMEOUT_FUNC) aisFsmRunEventDeauthTimeout, (ULONG) NULL);
 
@@ -430,6 +435,7 @@ VOID aisFsmUninit(IN P_ADAPTER_T prAdapter)
 	cnmTimerStopTimer(prAdapter, &prAisFsmInfo->rIndicationOfDisconnectTimer);
 	cnmTimerStopTimer(prAdapter, &prAisFsmInfo->rJoinTimeoutTimer);
 	cnmTimerStopTimer(prAdapter, &prAisFsmInfo->rScanDoneTimer);
+	cnmTimerStopTimer(prAdapter, &prAisFsmInfo->rChannelTimeoutTimer);
 
 	/* 4 <2> flush pending request */
 	aisFsmFlushRequest(prAdapter);
@@ -525,7 +531,10 @@ VOID aisFsmStateInit_JOIN(IN P_ADAPTER_T prAdapter, P_BSS_DESC_T prBssDesc)
 		case AUTH_MODE_WPA_PSK:
 		case AUTH_MODE_WPA2:
 		case AUTH_MODE_WPA2_PSK:
-			prAisFsmInfo->ucAvailableAuthTypes = (UINT_8) AUTH_TYPE_OPEN_SYSTEM;
+		case AUTH_MODE_WPA2_FT:
+		case AUTH_MODE_WPA2_FT_PSK:
+			prAisFsmInfo->ucAvailableAuthTypes
+				= (UINT_8) AUTH_TYPE_OPEN_SYSTEM;
 			break;
 
 		case AUTH_MODE_SHARED:
@@ -562,8 +571,17 @@ VOID aisFsmStateInit_JOIN(IN P_ADAPTER_T prAdapter, P_BSS_DESC_T prBssDesc)
 
 		prStaRec->fgIsReAssoc = TRUE;	/* We do roaming while the medium is connected */
 
-		/* TODO(Kevin): We may call a sub function to acquire the Roaming Auth Type */
-		prAisFsmInfo->ucAvailableAuthTypes = prAisSpecificBssInfo->ucRoamingAuthTypes;
+		switch (prConnSettings->eAuthMode) {
+		case AUTH_MODE_WPA2_FT:
+		case AUTH_MODE_WPA2_FT_PSK:
+			prAisFsmInfo->ucAvailableAuthTypes =
+			    (uint8_t) AUTH_TYPE_FAST_BSS_TRANSITION;
+			break;
+		default:
+			prAisFsmInfo->ucAvailableAuthTypes =
+			    prAisSpecificBssInfo->ucRoamingAuthTypes;
+			break;
+		}
 
 		prStaRec->ucTxAuthAssocRetryLimit = TX_AUTH_ASSOCI_RETRY_LIMIT_FOR_ROAMING;
 	}
@@ -618,19 +636,8 @@ VOID aisFsmStateInit_JOIN(IN P_ADAPTER_T prAdapter, P_BSS_DESC_T prBssDesc)
 	prJoinReqMsg->ucSeqNum = ++prAisFsmInfo->ucSeqNumOfReqMsg;
 	prJoinReqMsg->prStaRec = prStaRec;
 
-	if (1) {
-		int j;
-		P_FRAG_INFO_T prFragInfo;
+	nicRxClearFrag(prAdapter, prStaRec);
 
-		for (j = 0; j < MAX_NUM_CONCURRENT_FRAGMENTED_MSDUS; j++) {
-			prFragInfo = &prStaRec->rFragInfo[j];
-
-			if (prFragInfo->pr1stFrag) {
-				/* nicRxReturnRFB(prAdapter, prFragInfo->pr1stFrag); */
-				prFragInfo->pr1stFrag = (P_SW_RFB_T) NULL;
-			}
-		}
-	}
 #if CFG_SUPPORT_CFG80211_AUTH
 	prConnSettings->fgIsConnInitialized = TRUE;
 #endif
@@ -669,7 +676,7 @@ BOOLEAN aisFsmStateInit_RetryJOIN(IN P_ADAPTER_T prAdapter, P_STA_RECORD_T prSta
 	}
 
 	if (prAisFsmInfo->ucAvailableAuthTypes & (uint8_t)
-	    AUTH_TYPE_OPEN_SYSTEM) {
+	    AUTH_TYPE_SHARED_KEY) {
 		DBGLOG(AIS, INFO, "RETRY JOIN INIT: Retry Authentication with AuthType == SHARED_KEY.\n");
 
 		prAisFsmInfo->ucAvailableAuthTypes &= ~(UINT_8) AUTH_TYPE_SHARED_KEY;
@@ -981,6 +988,14 @@ VOID aisFsmSteps(IN P_ADAPTER_T prAdapter, ENUM_AIS_STATE_T eNextState)
 			prAisReq = aisFsmGetNextRequest(prAdapter);
 			cnmTimerStopTimer(prAdapter, &prAisFsmInfo->rScanDoneTimer);
 			if (prAisReq == NULL || prAisReq->eReqType == AIS_REQUEST_RECONNECT) {
+				if (IS_NET_ACTIVE(prAdapter,
+					prAisBssInfo->ucBssIndex)) {
+					UNSET_NET_ACTIVE(prAdapter,
+					prAisBssInfo->ucBssIndex);
+					nicDeactivateNetwork(prAdapter,
+					prAisBssInfo->ucBssIndex);
+				}
+
 				if (prConnSettings->fgIsConnReqIssued == TRUE &&
 				    prConnSettings->fgIsDisconnectedByNonRequest
 				    == FALSE && !atomic_read(
@@ -988,11 +1003,10 @@ VOID aisFsmSteps(IN P_ADAPTER_T prAdapter, ENUM_AIS_STATE_T eNextState)
 
 					prAisFsmInfo->fgTryScan = TRUE;
 
-					if (!IS_NET_ACTIVE(prAdapter, prAdapter->prAisBssInfo->ucBssIndex)) {
-						SET_NET_ACTIVE(prAdapter, prAdapter->prAisBssInfo->ucBssIndex);
-						/* sync with firmware */
-						nicActivateNetwork(prAdapter, prAdapter->prAisBssInfo->ucBssIndex);
-					}
+					SET_NET_ACTIVE(prAdapter,
+					prAdapter->prAisBssInfo->ucBssIndex);
+					nicActivateNetwork(prAdapter,
+					prAdapter->prAisBssInfo->ucBssIndex);
 
 					SET_NET_PWR_STATE_ACTIVE(prAdapter, prAdapter->prAisBssInfo->ucBssIndex);
 
@@ -1013,18 +1027,20 @@ VOID aisFsmSteps(IN P_ADAPTER_T prAdapter, ENUM_AIS_STATE_T eNextState)
 						DBGLOG(BSS, INFO,
 						       "[BSSidx][Network]=%d PNOEnable&&OP_MODE_INFRASTRUCTURE,KEEP ACTIVE\n",
 						       prAisBssInfo->ucBssIndex);
-					} else
-#endif
-					{
-						UNSET_NET_ACTIVE(prAdapter, prAdapter->prAisBssInfo->ucBssIndex);
-						nicDeactivateNetwork(prAdapter, prAdapter->prAisBssInfo->ucBssIndex);
+					SET_NET_ACTIVE(prAdapter,
+					prAdapter->prAisBssInfo->ucBssIndex);
+					nicActivateNetwork(prAdapter,
+					prAdapter->prAisBssInfo->ucBssIndex);
 					}
+#endif
 
 					/* check for other pending request */
 					if (prAisReq && (aisFsmIsRequestPending
 							 (prAdapter, AIS_REQUEST_SCAN, TRUE) == TRUE)) {
 						wlanClearScanningResult(prAdapter);
 						eNextState = AIS_STATE_SCAN;
+						prConnSettings->
+						fgIsScanReqIssued = TRUE;
 
 						cnmTimerStartTimer(prAdapter,
 							&prAdapter->rWifiVar.
@@ -1047,6 +1063,7 @@ VOID aisFsmSteps(IN P_ADAPTER_T prAdapter, ENUM_AIS_STATE_T eNextState)
 				wlanClearScanningResult(prAdapter);
 
 				eNextState = AIS_STATE_SCAN;
+				prConnSettings->fgIsScanReqIssued = TRUE;
 				cnmTimerStartTimer(prAdapter,
 					&prAdapter->rWifiVar.
 					rAisFsmInfo.rScanDoneTimer,
@@ -1266,6 +1283,12 @@ VOID aisFsmSteps(IN P_ADAPTER_T prAdapter, ENUM_AIS_STATE_T eNextState)
 			break;
 
 		case AIS_STATE_SCAN:
+#if CFG_SUPPORT_CFG80211_AUTH
+			/*clear all bss Desc to avoid the bss
+			 *in driver and supplicant is not sync
+			 */
+			scanRemoveAllBssDesc(prAdapter);
+#endif
 		case AIS_STATE_ONLINE_SCAN:
 		case AIS_STATE_LOOKING_FOR:
 
@@ -1445,6 +1468,9 @@ VOID aisFsmSteps(IN P_ADAPTER_T prAdapter, ENUM_AIS_STATE_T eNextState)
 
 		case AIS_STATE_JOIN_FAILURE:
 			prConnSettings->fgIsDisconnectedByNonRequest = TRUE;
+			if (prAisFsmInfo->prTargetBssDesc) {
+				prAisFsmInfo->prTargetBssDesc->fgIsConnecting = FALSE;
+			}
 
 			nicMediaJoinFailure(prAdapter, prAdapter->prAisBssInfo->ucBssIndex, WLAN_STATUS_JOIN_TIMEOUT);
 
@@ -1493,6 +1519,13 @@ VOID aisFsmSteps(IN P_ADAPTER_T prAdapter, ENUM_AIS_STATE_T eNextState)
 			break;
 
 		case AIS_STATE_DISCONNECTING:
+#if CFG_SUPPORT_CFG80211_AUTH
+			prConnSettings->fgIsDisconnectedByNonRequest = TRUE;
+			if (prAisFsmInfo->prTargetBssDesc) {
+				prAisFsmInfo->prTargetBssDesc->fgIsConnecting
+					= FALSE;
+			}
+#endif
 			/* send for deauth frame for disconnection */
 			ucReasonCode = REASON_CODE_DEAUTH_LEAVING_BSS;
 #if CFG_DISCONN_DEBUG_FEATURE
@@ -1538,10 +1571,15 @@ VOID aisFsmSteps(IN P_ADAPTER_T prAdapter, ENUM_AIS_STATE_T eNextState)
 			break;
 
 		case AIS_STATE_REMAIN_ON_CHANNEL:
-			SET_NET_ACTIVE(prAdapter, prAdapter->prAisBssInfo->ucBssIndex);
+			if (!IS_NET_ACTIVE(prAdapter,
+				prAdapter->prAisBssInfo->ucBssIndex)) {
+			SET_NET_ACTIVE(prAdapter,
+				prAdapter->prAisBssInfo->ucBssIndex);
 
-			/* sync with firmware */
-			nicActivateNetwork(prAdapter, prAdapter->prAisBssInfo->ucBssIndex);
+				/* sync with firmware */
+				nicActivateNetwork(prAdapter,
+					prAdapter->prAisBssInfo->ucBssIndex);
+			}
 			prAisBssInfo->fgIsNetRequestInActive = FALSE;
 			break;
 
@@ -1777,6 +1815,9 @@ VOID aisFsmRunEventAbort(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr)
 	UINT_8 ucReasonOfDisconnect;
 	BOOLEAN fgDelayIndication;
 	P_CONNECTION_SETTINGS_T prConnSettings;
+#if CFG_SUPPORT_CFG80211_AUTH
+	P_BSS_INFO_T prAisBssInfo;
+#endif
 
 	DEBUGFUNC("aisFsmRunEventAbort()");
 
@@ -1784,6 +1825,14 @@ VOID aisFsmRunEventAbort(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr)
 	ASSERT(prMsgHdr);
 	prAisFsmInfo = &(prAdapter->rWifiVar.rAisFsmInfo);
 	prConnSettings = &(prAdapter->rWifiVar.rConnSettings);
+
+#if CFG_SUPPORT_CFG80211_AUTH
+	/* clear the previous connecting info */
+	/* to avoid block in fsm Join state */
+	prAisBssInfo = prAdapter->prAisBssInfo;
+	kalMemZero(prAisBssInfo->aucSSID, sizeof(prAisBssInfo->aucSSID));
+	prAisBssInfo->ucSSIDLen = 0;
+#endif
 
 	/* 4 <1> Extract information of Abort Message and then free memory. */
 	prAisAbortMsg = (P_MSG_AIS_ABORT_T) prMsgHdr;
@@ -1965,11 +2014,15 @@ VOID aisFsmStateAbort(IN P_ADAPTER_T prAdapter, UINT_8 ucReasonOfDisconnect, BOO
 		break;
 
 	case AIS_STATE_REQ_REMAIN_ON_CHANNEL:
+		fgIsCheckConnected = TRUE;
+
 		/* release channel */
 		aisFsmReleaseCh(prAdapter);
 		break;
 
 	case AIS_STATE_REMAIN_ON_CHANNEL:
+		fgIsCheckConnected = TRUE;
+
 		/* 1. release channel */
 		aisFsmReleaseCh(prAdapter);
 
@@ -2168,7 +2221,11 @@ enum _ENUM_AIS_STATE_T aisFsmJoinCompleteAction(IN struct _ADAPTER_T *prAdapter,
 	/* 4 <2> JOIN was not successful */
 	else {
 		/* 4 <2.1> Redo JOIN process with other	Auth Type if possible */
-		if (aisFsmStateInit_RetryJOIN(prAdapter, prStaRec) == FALSE) {
+#if !CFG_SUPPORT_CFG80211_AUTH
+		/* for supplicant sme, no need to retry driver Join */
+		if (aisFsmStateInit_RetryJOIN(prAdapter, prStaRec) == FALSE)
+#endif
+		{
 			struct _BSS_DESC_T *prBssDesc;
 			PARAM_SSID_T rParamSsid;
 
@@ -2209,8 +2266,23 @@ enum _ENUM_AIS_STATE_T aisFsmJoinCompleteAction(IN struct _ADAPTER_T *prAdapter,
 #endif
 			}
 
-			if (prBssDesc == NULL)
+			if (prBssDesc == NULL) {
+				DBGLOG(AIS, WARN,"prBssDesc == NULL ->JOIN FAIL");
+				/* Free STA-REC */
+				if (prStaRec != prAisBssInfo->prStaRecOfAP)
+					cnmStaRecFree(prAdapter, prStaRec);
+
+#if CFG_SUPPORT_CFG80211_AUTH
+				/* join fail, return disconnect
+				 * not to try driver reconnect
+				 */
+				prAdapter->rWifiVar.rConnSettings.bss = NULL;
+				DBGLOG(AIS, WARN,
+						"no bss find, Join failure\n");
+#endif
+				eNextState = AIS_STATE_JOIN_FAILURE;
 				return eNextState;
+			}
 
 			/* ASSERT(prBssDesc); */
 			/* ASSERT(prBssDesc->fgIsConnecting); */
@@ -2245,11 +2317,22 @@ enum _ENUM_AIS_STATE_T aisFsmJoinCompleteAction(IN struct _ADAPTER_T *prAdapter,
 				/* 4.a temrminate join operation */
 				eNextState = AIS_STATE_JOIN_FAILURE;
 			} else {
+#if CFG_SUPPORT_CFG80211_AUTH
+				/* join fail, return join failure status
+				 * not to try driver reconnect
+				 */
+				prAdapter->rWifiVar.
+					rConnSettings.bss = NULL;
+				eNextState = AIS_STATE_JOIN_FAILURE;
+				DBGLOG(AIS, WARN,
+					"Join fail, disconnect\n");
+#else
 				/* 4.b send reconnect request */
 				aisFsmInsertRequest(prAdapter,
 						AIS_REQUEST_RECONNECT);
 
 				eNextState = AIS_STATE_IDLE;
+#endif
 			}
 		}
 	}
@@ -3110,7 +3193,11 @@ VOID aisCollectDisconnInfo(IN P_ADAPTER_T prAdapter)
 
 	prAisBssInfo = prAdapter->prAisBssInfo;
 
+#if KERNEL_VERSION(5, 0, 0) <= LINUX_VERSION_CODE
+	ktime_get_real_ts64(&prDisconn->tv);
+#else
 	do_gettimeofday(&prDisconn->tv);
+#endif
 
 	prDisconn->ucTrigger = g_rDisconnInfoTemp.ucTrigger;
 	prDisconn->ucDisConnReason = prAisBssInfo->ucReasonOfDisconnect;
@@ -3455,6 +3542,14 @@ VOID aisFsmRunEventJoinTimeout(IN P_ADAPTER_T prAdapter, ULONG ulParamPtr)
 		/* 2. Increase Join Failure Count */
 		prAisFsmInfo->prTargetStaRec->ucJoinFailureCount++;
 
+#if CFG_SUPPORT_CFG80211_AUTH
+		/* join fail, return disconnect
+		 * not to try driver reconnect
+		 */
+		prAdapter->rWifiVar.rConnSettings.bss = NULL;
+		eNextState = AIS_STATE_DISCONNECTING;
+		DBGLOG(AIS, WARN, "set rConnSetting.bss = NULL\n");
+#else
 		if (prAisFsmInfo->prTargetStaRec->ucJoinFailureCount < JOIN_MAX_RETRY_FAILURE_COUNT) {
 			/* 3.1 Retreat to AIS_STATE_SEARCH state for next try */
 			eNextState = AIS_STATE_SEARCH;
@@ -3471,7 +3566,7 @@ VOID aisFsmRunEventJoinTimeout(IN P_ADAPTER_T prAdapter, ULONG ulParamPtr)
 			/* 3.4 Retreat to AIS_STATE_JOIN_FAILURE to terminate join operation */
 			eNextState = AIS_STATE_JOIN_FAILURE;
 		}
-
+#endif
 		break;
 
 	case AIS_STATE_NORMAL_TR:
@@ -3490,6 +3585,7 @@ VOID aisFsmRunEventJoinTimeout(IN P_ADAPTER_T prAdapter, ULONG ulParamPtr)
 	default:
 		/* release channel */
 		aisFsmReleaseCh(prAdapter);
+		prAisFsmInfo->fgIsInfraChannelFinished = TRUE;
 		break;
 
 	}
@@ -3893,6 +3989,9 @@ VOID aisBssBeaconTimeout(IN P_ADAPTER_T prAdapter)
 			DISCONNECT_TRIGGER_PASSIVE;
 #endif
 		DBGLOG(AIS, EVENT, "aisBssBeaconTimeout\n");
+#if CFG_SUPPORT_CFG80211_AUTH
+		prConnSettings->fgIsConnReqIssued = FALSE;
+#endif
 #if CFG_SUPPORT_ROAMING
 		prConnSettings->fgIsDisconnectedByNonRequest = FALSE;
 		aisFsmStateAbort(prAdapter, DISCONNECT_REASON_CODE_RADIO_LOST,

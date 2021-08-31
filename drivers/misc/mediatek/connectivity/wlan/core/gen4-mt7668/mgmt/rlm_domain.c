@@ -2900,16 +2900,6 @@ enum regd_state rlmDomainStateTransition(enum regd_state request_state, struct r
 	return g_mtk_regd_control.state;
 }
 
-void rlmDomainSetRefWiphy(struct wiphy *pWiphy)
-{
-	g_mtk_regd_control.pRefWiphy = pWiphy;
-}
-
-struct wiphy *rlmDomainGetRefWiphy(void)
-{
-	return g_mtk_regd_control.pRefWiphy;
-}
-
 /**
  * rlmDomainChannelFlagString - Transform channel flags to readable string
  *
@@ -2976,7 +2966,6 @@ void rlmDomainParsingChannel(IN struct wiphy *pWiphy)
 	 */
 
 	rlmDomainResetActiveChannel();
-	rlmDomainSetRefWiphy(pWiphy);
 
 	ch_count = 0;
 	for (band_idx = 0; band_idx < KAL_NUM_BANDS; band_idx++) {

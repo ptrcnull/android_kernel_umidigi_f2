@@ -923,7 +923,6 @@ assocCheckRxReAssocRspFrameStatus(IN struct ADAPTER *prAdapter,
 {
 	struct STA_RECORD *prStaRec;
 	struct WLAN_ASSOC_RSP_FRAME *prAssocRspFrame;
-	uint16_t u2RxFrameCtrl;
 	uint16_t u2RxCapInfo;
 	uint16_t u2RxStatusCode;
 	uint16_t u2RxAssocId;
@@ -943,21 +942,6 @@ assocCheckRxReAssocRspFrameStatus(IN struct ADAPTER *prAdapter,
 
 	/* 4 <1> locate the (Re)Association Resp Frame. */
 	prAssocRspFrame = (struct WLAN_ASSOC_RSP_FRAME *)prSwRfb->pvHeader;
-
-	/* 4 <2> Parse the Header of (Re)Association Resp Frame. */
-	/* WLAN_GET_FIELD_16(&prAssocRspFrame->u2FrameCtrl, &u2RxFrameCtrl); */
-	u2RxFrameCtrl = prAssocRspFrame->u2FrameCtrl;
-	/* NOTE(Kevin): Optimized for ARM */
-	u2RxFrameCtrl &= MASK_FRAME_TYPE;
-	if (prStaRec->fgIsReAssoc) {
-		if (u2RxFrameCtrl != MAC_FRAME_REASSOC_RSP)
-			return WLAN_STATUS_FAILURE;
-
-	} else {
-		if (u2RxFrameCtrl != MAC_FRAME_ASSOC_RSP)
-			return WLAN_STATUS_FAILURE;
-
-	}
 
 	/* 4 <3> Parse the Fixed Fields of (Re)Association Resp Frame Body. */
 	/* WLAN_GET_FIELD_16(&prAssocRspFrame->u2CapInfo, &u2RxCapInfo); */

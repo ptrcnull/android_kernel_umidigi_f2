@@ -312,7 +312,8 @@ void wlanAdapterDestroy(IN struct ADAPTER *prAdapter)
 	if (!prAdapter)
 		return;
 
-	scanLogCacheFlushAll(&(prAdapter->rWifiVar.rScanInfo.rScanLogCache),
+	scanLogCacheFlushAll(prAdapter,
+		&(prAdapter->rWifiVar.rScanInfo.rScanLogCache),
 		LOG_SCAN_D2D, SCAN_LOG_MSG_MAX_LEN);
 
 	kalMemFree(prAdapter, VIR_MEM_TYPE, sizeof(struct ADAPTER));
@@ -421,17 +422,6 @@ void wlanOnPostNicInitAdapter(IN struct ADAPTER *prAdapter,
 
 	/* 4 <4> Initialize Rx */
 	nicRxInitialize(prAdapter);
-}
-
-void wlanOnPostInitHifInfo(IN struct ADAPTER *prAdapter)
-{
-	DBGLOG(INIT, TRACE, "start.\n");
-
-	/* 4 <6> Enable HIF cut-through to N9 mode, not visiting CR4 */
-	HAL_ENABLE_FWDL(prAdapter, TRUE);
-
-	/* 4 <7> Get ECO Version */
-	wlanSetChipEcoInfo(prAdapter);
 }
 
 void wlanOnPostFirmwareReady(IN struct ADAPTER *prAdapter,
@@ -667,6 +657,7 @@ uint32_t wlanAdapterStart(IN struct ADAPTER *prAdapter,
 		DRIVER_OWN_FAIL,
 		INIT_ADAPTER_FAIL,
 		INIT_HIFINFO_FAIL,
+		SET_CHIP_ECO_INFO_FAIL,
 		RAM_CODE_DOWNLOAD_FAIL,
 		WAIT_FIRMWARE_READY_FAIL,
 		FAIL_REASON_MAX
@@ -746,7 +737,16 @@ uint32_t wlanAdapterStart(IN struct ADAPTER *prAdapter,
 			break;
 		}
 
-		wlanOnPostInitHifInfo(prAdapter);
+		/* 4 <6> Enable HIF cut-through to N9 mode, not visiting CR4 */
+		HAL_ENABLE_FWDL(prAdapter, TRUE);
+
+		/* 4 <7> Get ECO Version */
+		if (wlanSetChipEcoInfo(prAdapter) != WLAN_STATUS_SUCCESS) {
+			DBGLOG(INIT, ERROR, "wlanSetChipEcoInfo failed!\n");
+			u4Status = WLAN_STATUS_FAILURE;
+			eFailReason = SET_CHIP_ECO_INFO_FAIL;
+			break;
+		}
 
 #if CFG_ENABLE_FW_DOWNLOAD
 		/* 4 <8> FW/patch download */
@@ -884,6 +884,7 @@ uint32_t wlanAdapterStart(IN struct ADAPTER *prAdapter,
 			switch (eFailReason) {
 			case WAIT_FIRMWARE_READY_FAIL:
 			case RAM_CODE_DOWNLOAD_FAIL:
+			case SET_CHIP_ECO_INFO_FAIL:
 			case INIT_HIFINFO_FAIL:
 				nicRxUninitialize(prAdapter);
 				nicTxRelease(prAdapter, FALSE);
@@ -2863,12 +2864,12 @@ u_int8_t wlanIsHandlerAllowedInRFTest(
  */
 /*----------------------------------------------------------------------------*/
 
-void wlanSetChipEcoInfo(IN struct ADAPTER *prAdapter)
+uint32_t wlanSetChipEcoInfo(IN struct ADAPTER *prAdapter)
 {
 	uint32_t hw_version = 0, sw_version = 0;
 	struct mt66xx_chip_info *prChipInfo = prAdapter->chip_info;
 	uint32_t chip_id = prChipInfo->chip_id;
-	/* WLAN_STATUS status; */
+	uint32_t u4Status = WLAN_STATUS_SUCCESS;
 
 	DEBUGFUNC("wlanSetChipEcoInfo.\n");
 
@@ -2876,10 +2877,12 @@ void wlanSetChipEcoInfo(IN struct ADAPTER *prAdapter)
 	    WLAN_STATUS_SUCCESS) {
 		DBGLOG(INIT, ERROR,
 		       "wlanSetChipEcoInfo >> get TOP_HVR failed.\n");
+		u4Status = WLAN_STATUS_FAILURE;
 	} else if (wlanAccessRegister(prAdapter, TOP_FVR, &sw_version, 0, 0) !=
 	    WLAN_STATUS_SUCCESS) {
 		DBGLOG(INIT, ERROR,
 		       "wlanSetChipEcoInfo >> get TOP_FVR failed.\n");
+		u4Status = WLAN_STATUS_FAILURE;
 	} else {
 		/* success */
 		nicSetChipHwVer((uint8_t)(GET_HW_VER(hw_version) & 0xFF));
@@ -2895,6 +2898,8 @@ void wlanSetChipEcoInfo(IN struct ADAPTER *prAdapter)
 	       "Chip ID[%04X] Version[E%u] HW[0x%08x] SW[0x%08x]\n",
 	       chip_id, prAdapter->chip_info->eco_ver, hw_version,
 	       sw_version);
+
+	return u4Status;
 }
 
 /*----------------------------------------------------------------------------*/
@@ -3692,7 +3697,6 @@ uint32_t wlanProcessCmdDataFrame(IN struct ADAPTER
 	}
 
 	/* Fill-up MSDU_INFO and TxD*/
-	prMsduInfo->eSrc = TX_PACKET_OS;
 	if (!nicTxFillMsduInfo(prAdapter, prMsduInfo, prPacket) ||
 	    !nicTxProcessCmdDataPacket(prAdapter, prMsduInfo)) {
 

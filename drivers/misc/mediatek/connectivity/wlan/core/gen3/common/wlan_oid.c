@@ -2240,6 +2240,11 @@ wlanoidSetAddKey(IN P_ADAPTER_T prAdapter, IN PVOID pvSetBuffer, IN UINT_32 u4Se
 		}
 	}
 
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+	/* clear fragment cache when rekey */
+	nicRxClearFrag(prAdapter, prStaRec);
+#endif
+
 	prWlanTable = prAdapter->rWifiVar.arWtbl;
 
 	prGlueInfo = prAdapter->prGlueInfo;

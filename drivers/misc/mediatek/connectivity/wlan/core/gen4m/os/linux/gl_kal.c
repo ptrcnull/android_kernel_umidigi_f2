@@ -987,17 +987,19 @@ uint32_t kal_is_skb_gro(struct ADAPTER *prAdapter, uint8_t ucBssIdx)
  *
  */
 /*----------------------------------------------------------------------------*/
-void kal_gro_flush(struct ADAPTER *prAdapter, uint8_t ucBssIdx)
+void kal_gro_flush(struct ADAPTER *prAdapter, struct net_device *prDev)
 {
 	struct WIFI_VAR *prWifiVar = &prAdapter->rWifiVar;
+	struct NETDEV_PRIVATE_GLUE_INFO *prNetDevPrivate =
+			(struct NETDEV_PRIVATE_GLUE_INFO *) netdev_priv(prDev);
 
 	if (CHECK_FOR_TIMEOUT(kalGetTimeTick(),
-		prAdapter->tmGROFlushTimeout[ucBssIdx],
+		prNetDevPrivate->tmGROFlushTimeout,
 		prWifiVar->ucGROFlushTimeout)) {
-		napi_gro_flush(&prAdapter->prGlueInfo->napi[ucBssIdx], false);
-		DBGLOG_LIMITED(INIT, TRACE, "napi_gro_flush: %d\n", ucBssIdx);
+		napi_gro_flush(&prNetDevPrivate->napi, false);
+		DBGLOG_LIMITED(INIT, TRACE, "napi_gro_flush:%p\n", prDev);
 	}
-	GET_CURRENT_SYSTIME(&prAdapter->tmGROFlushTimeout[ucBssIdx]);
+	GET_CURRENT_SYSTIME(&prNetDevPrivate->tmGROFlushTimeout);
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1019,6 +1021,7 @@ uint32_t kalRxIndicateOnePkt(IN struct GLUE_INFO
 	struct sk_buff *prSkb = NULL;
 	struct mt66xx_chip_info *prChipInfo;
 	uint8_t ucBssIdx;
+	struct NETDEV_PRIVATE_GLUE_INFO *prNetDevPrivate = NULL;
 
 	ASSERT(prGlueInfo);
 	ASSERT(pvPkt);
@@ -1171,18 +1174,20 @@ uint32_t kalRxIndicateOnePkt(IN struct GLUE_INFO
 		 * disable preempt and protect by spin lock
 		 */
 		preempt_disable();
-		spin_lock_bh(&prGlueInfo->napi_spinlock);
-		napi_gro_receive(&prGlueInfo->napi[ucBssIdx], prSkb);
-		kal_gro_flush(prGlueInfo->prAdapter, ucBssIdx);
-		spin_unlock_bh(&prGlueInfo->napi_spinlock);
+		prNetDevPrivate = (struct NETDEV_PRIVATE_GLUE_INFO *)
+			netdev_priv(prNetDev);
+		spin_lock_bh(&prNetDevPrivate->napi_spinlock);
+		napi_gro_receive(&prNetDevPrivate->napi, prSkb);
+		kal_gro_flush(prGlueInfo->prAdapter, prNetDev);
+		spin_unlock_bh(&prNetDevPrivate->napi_spinlock);
 		preempt_enable();
-		DBGLOG_LIMITED(INIT, INFO, "napi_gro_receive:%d\n", ucBssIdx);
-	} else {
-		if (!in_interrupt())
-			netif_rx_ni(prSkb);
-		else
-			netif_rx(prSkb);
+		DBGLOG_LIMITED(INIT, INFO, "napi_gro_receive:%p\n", prNetDev);
+		return WLAN_STATUS_SUCCESS;
 	}
+	if (!in_interrupt())
+		netif_rx_ni(prSkb);
+	else
+		netif_rx(prSkb);
 
 	return WLAN_STATUS_SUCCESS;
 }
@@ -2620,9 +2625,10 @@ kalQoSFrameClassifierAndPacketInfo(IN struct GLUE_INFO *prGlueInfo,
 		}
 #if DSCP_SUPPORT
 		if (GLUE_GET_PKT_BSS_IDX(prSkb) != P2P_DEV_BSS_INDEX) {
-			ucUserPriority = getUpFromDscp(prGlueInfo,
+			ucUserPriority = getUpFromDscp(
+				prGlueInfo,
 				GLUE_GET_PKT_BSS_IDX(prSkb),
-				(pucNextProtocol[1] & 0xFC) >> 2);
+				(pucNextProtocol[1] >> 2) & 0x3F);
 			if (ucUserPriority != 0xFF)
 				prSkb->priority = ucUserPriority;
 		}
@@ -2659,11 +2665,30 @@ kalQoSFrameClassifierAndPacketInfo(IN struct GLUE_INFO *prGlueInfo,
 		kalTdlsFrameClassifier(prGlueInfo, prPacket,
 				       pucNextProtocol, prTxPktInfo);
 		break;
-#if (CFG_SUPPORT_STATISTICS == 1)
+
 	case ETH_P_IPV6:
+#if (CFG_SUPPORT_STATISTICS == 1)
 		wlanLogTxData(WLAN_WAKE_IPV6);
-		break;
 #endif
+
+#if DSCP_SUPPORT
+		if (GLUE_GET_PKT_BSS_IDX(prSkb) != P2P_DEV_BSS_INDEX) {
+			uint16_t u2Tmp;
+			uint8_t ucIpTos;
+
+			WLAN_GET_FIELD_BE16(pucNextProtocol, &u2Tmp);
+			ucIpTos = u2Tmp >> 4;
+
+			ucUserPriority = getUpFromDscp(
+				prGlueInfo,
+				GLUE_GET_PKT_BSS_IDX(prSkb),
+				(ucIpTos >> 2) & 0x3F);
+			if (ucUserPriority != 0xFF)
+				prSkb->priority = ucUserPriority;
+		}
+#endif
+		break;
+
 	default:
 #if (CFG_SUPPORT_STATISTICS == 1)
 		wlanLogTxData(WLAN_WAKE_OTHER);
@@ -7684,20 +7709,28 @@ void kalScanReqLog(struct cfg80211_scan_request *request)
 
 void kalScanResultLog(struct ADAPTER *prAdapter, struct ieee80211_mgmt *mgmt)
 {
+	KAL_SPIN_LOCK_DECLARATION();
+
+	KAL_ACQUIRE_SPIN_LOCK(prAdapter, SPIN_LOCK_BSSLIST_CFG);
 	scanLogCacheAddBSS(
 		&(prAdapter->rWifiVar.rScanInfo.rScanLogCache.rBSSListCFG),
 		prAdapter->rWifiVar.rScanInfo.rScanLogCache.arBSSListBufCFG,
 		LOG_SCAN_RESULT_D2K,
 		mgmt->bssid,
 		mgmt->seq_ctrl);
+	KAL_RELEASE_SPIN_LOCK(prAdapter, SPIN_LOCK_BSSLIST_CFG);
 }
 
 void kalScanLogCacheFlushBSS(struct ADAPTER *prAdapter,
 	const uint16_t logBufLen)
 {
+	KAL_SPIN_LOCK_DECLARATION();
+
+	KAL_ACQUIRE_SPIN_LOCK(prAdapter, SPIN_LOCK_BSSLIST_CFG);
 	scanLogCacheFlushBSS(
 		&(prAdapter->rWifiVar.rScanInfo.rScanLogCache.rBSSListCFG),
 		LOG_SCAN_DONE_D2K, logBufLen);
+	KAL_RELEASE_SPIN_LOCK(prAdapter, SPIN_LOCK_BSSLIST_CFG);
 }
 
 int kalMaskMemCmp(const void *cs, const void *ct,

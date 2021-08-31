@@ -1,7 +1,20 @@
+###############################################################################
+# Necessary Check
+
+ifeq ($(AUTOCONF_H),)
+    $(error AUTOCONF_H is not defined)
+endif
+
 ifneq ($(CONFIG_MTK_COMBO),)
+
+ccflags-y += -imacros $(AUTOCONF_H)
 
 ifeq ($(CONFIG_MTK_COMBO_CHIP),)
     $(error CONFIG_MTK_COMBO_CHIP not defined)
+endif
+
+ifeq ($(TARGET_BUILD_VARIANT),$(filter $(TARGET_BUILD_VARIANT),userdebug user))
+    #ldflags-y += -s
 endif
 
 # Force build fail on modpost warning
@@ -20,7 +33,6 @@ else
 endif
 ccflags-y += -D MTK_WCN_WMT_STP_EXP_SYMBOL_ABSTRACT
 
-ccflags-y += -I$(srctree)/kernel
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/include
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat/$(MTK_PLATFORM)/include
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat/$(MTK_PLATFORM)/include/mach

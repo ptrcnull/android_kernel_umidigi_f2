@@ -5910,6 +5910,11 @@ VOID wlanInitFeatureOption(IN P_ADAPTER_T prAdapter)
 	prWifiVar->ePowerMode = (PARAM_POWER_MODE) wlanCfgGetUint32(prAdapter, "PowerSave", Param_PowerModeMax);
 	prWifiVar->rScanInfo.rScanParam.u2DefaultDwellTime =
 	    (UINT_16)wlanCfgGetUint32(prAdapter, "DefaultDwellTime", 0);
+
+	/* add cfg from RegInfo */
+	prWifiVar->fgDisRoaming =
+		(uint32_t) wlanCfgGetUint32(prAdapter, "DisRoaming", 0);
+
 #ifdef CFG_SUPPORT_DATA_STALL
 	prWifiVar->u4PerHighThreshold = (uint32_t) wlanCfgGetUint32(
 			prAdapter, "PerHighThreshold",
@@ -5940,7 +5945,7 @@ VOID wlanCfgSetSwCtrl(IN P_ADAPTER_T prAdapter)
 	CHAR aucValue[WLAN_CFG_VALUE_LEN_MAX];
 	CHAR *pcPtr = NULL;
 	CHAR *pcDupValue = NULL;
-	UINT_32 au4Values[2];
+	UINT_32 au4Values[2] = {0};
 	UINT_32 u4TokenCount = 0;
 	UINT_32 u4BufLen = 0;
 	WLAN_STATUS rStatus = WLAN_STATUS_SUCCESS;

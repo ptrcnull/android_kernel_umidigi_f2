@@ -678,6 +678,19 @@ enum ENUM_WMM_ACI {
 	WMM_AC_INDEX_NUM
 };
 
+/* WMM QOS user priority from 802.1D/802.11e */
+enum ENUM_WMM_UP {
+	WMM_UP_BE_INDEX = 0,
+	WMM_UP_BK_INDEX,
+	WMM_UP_RESV_INDEX,
+	WMM_UP_EE_INDEX,
+	WMM_UP_CL_INDEX,
+	WMM_UP_VI_INDEX,
+	WMM_UP_VO_INDEX,
+	WMM_UP_NC_INDEX,
+	WMM_UP_INDEX_NUM
+};
+
 /* Used for CMD Queue Operation */
 enum ENUM_FRAME_ACTION {
 	FRAME_ACTION_DROP_PKT = 0,
@@ -1157,10 +1170,28 @@ void qmHandleRxArpPackets(struct ADAPTER *prAdapter,
 void qmHandleRxDhcpPackets(struct ADAPTER *prAdapter,
 			   struct SW_RFB *prSwRfb);
 #endif
+
+#if defined(CFG_SUPPORT_REPLAY_DETECTION) || \
+	defined(CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION)
+#define CCMPTSCPNNUM	6
+u_int8_t qmRxPNtoU64(uint8_t *pucPN, uint8_t uPNNum,
+	uint64_t *pu64Rets);
+#endif
+
 #ifdef CFG_SUPPORT_REPLAY_DETECTION
 u_int8_t qmHandleRxReplay(struct ADAPTER *prAdapter,
 			  struct SW_RFB *prSwRfb);
 #endif
+
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+u_int8_t qmDetectRxInvalidEAPOL(IN struct ADAPTER *prAdapter,
+	IN struct SW_RFB *prSwRfb);
+#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
+
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+u_int8_t qmAmsduAttackDetection(IN struct ADAPTER *prAdapter,
+	IN struct SW_RFB *prSwRfb);
+#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
 
 u_int8_t
 qmIsNoDropPacket(IN struct ADAPTER *prAdapter, IN struct SW_RFB *prSwRfb);

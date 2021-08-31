@@ -84,6 +84,12 @@
 #include <linux/mmc/sdio_ids.h>
 #endif
 
+#if CFG_SUPPORT_WOW_EINT
+#include <linux/of.h>
+#include <linux/of_address.h>
+#include <linux/of_irq.h>
+#endif
+
 #include <linux/mm.h>
 #ifndef CONFIG_X86
 #include <asm/memory.h>
@@ -105,6 +111,11 @@
 
 #define HIF_SDIO_ACCESS_RETRY_LIMIT         3
 #define HIF_SDIO_INTERRUPT_RESPONSE_TIMEOUT (15000)
+
+#if CFG_SUPPORT_WOW_EINT
+#define WIFI_COMPATIBLE_NODE_NAME	"mediatek,mt7668-wifi"
+#define WIFI_INTERRUPT_NAME		"mt7668-wifi-eint"
+#endif
 
 #if MTK_WCN_HIF_SDIO
 
@@ -182,7 +193,7 @@ static const struct dev_pm_ops mtk_sdio_pm_ops = {
 };
 
 static struct sdio_driver mtk_sdio_driver = {
-#ifdef CFG_SUPPORT_DUAL_CARD_DUAL_DRIVER_B
+#if CFG_SUPPORT_DUAL_CARD_DUAL_DRIVER_B
 	.name = "wlanb",        /* "MTK SDIO WLAN Driver" */
 #else
 	.name = "wlan",     /* "MTK SDIO WLAN Driver" */
@@ -223,6 +234,85 @@ static struct sdio_driver mtk_sdio_driver = {
 * \return void
 */
 /*----------------------------------------------------------------------------*/
+
+#if CFG_SUPPORT_WOW_EINT
+static irqreturn_t wifi_wow_isr(int irq, void *dev)
+{
+	return IRQ_HANDLED;
+}
+
+static void wlan_register_irq(struct WOWLAN_DEV_NODE *node)
+{
+	struct device_node *eint_node = NULL;
+	int interrupts[2];
+
+	eint_node = of_find_compatible_node(NULL,
+			NULL, WIFI_COMPATIBLE_NODE_NAME);
+	if (eint_node) {
+		node->wowlan_irq = irq_of_parse_and_map(eint_node, 0);
+		DBGLOG(INIT, INFO, "%s, WOWLAN irq_number = %d\n", __func__,
+			node->wowlan_irq);
+		if (node->wowlan_irq) {
+			of_property_read_u32_array(eint_node,
+				"interrupts",
+				interrupts,
+				ARRAY_SIZE(interrupts));
+			node->wowlan_irqlevel = interrupts[1];
+			if (request_irq(node->wowlan_irq,
+				wifi_wow_isr,
+				node->wowlan_irqlevel,
+				WIFI_INTERRUPT_NAME,
+				node)) {
+				DBGLOG(INIT, ERROR,
+					"%s, WOWLAN irq NOT AVAILABLE!\n",
+					__func__);
+			} else {
+				disable_irq_nosync(node->wowlan_irq);
+			}
+		} else {
+			DBGLOG(INIT, ERROR,
+				"%s, can't find wifi_ctrl irq\n",
+				__func__);
+		}
+
+	} else {
+		node->wowlan_irq = 0;
+		DBGLOG(INIT, ERROR,
+			"%s, can't find wifi_ctrl compatible node\n",
+			__func__);
+	}
+}
+
+static void mtk_sdio_eint_interrupt(struct sdio_func *func)
+{
+	P_GLUE_INFO_T prGlueInfo = NULL;
+
+	prGlueInfo = sdio_get_drvdata(func);
+	if (!prGlueInfo)
+		return;
+
+	prGlueInfo->prAdapter->rWowlanDevNode.func = func;
+	wlan_register_irq(&(prGlueInfo->prAdapter->rWowlanDevNode));
+}
+
+static void mtk_sdio_eint_free_irq(struct sdio_func *func)
+{
+	P_GLUE_INFO_T prGlueInfo = NULL;
+	UINT_32 u4Irq = 0;
+
+	prGlueInfo = sdio_get_drvdata(func);
+	if (!prGlueInfo)
+		return;
+
+	u4Irq = prGlueInfo->prAdapter->rWowlanDevNode.wowlan_irq;
+	if (u4Irq) {
+		disable_irq_nosync(u4Irq);
+		free_irq(u4Irq,
+			&prGlueInfo->prAdapter->rWowlanDevNode);
+	}
+}
+
+#endif
 
 #if MTK_WCN_HIF_SDIO
 
@@ -333,9 +423,9 @@ INT_32 mtk_sdio_probe(
 int mtk_sdio_probe(struct sdio_func *func, const struct sdio_device_id *id)
 {
 	int ret = 0;
-#if defined(CFG_SUPPORT_DUAL_CARD_DUAL_DRIVER_A)
+#if CFG_SUPPORT_DUAL_CARD_DUAL_DRIVER_A
 #define MMC_FILTER	"mmc1"
-#elif defined(CFG_SUPPORT_DUAL_CARD_DUAL_DRIVER_B)
+#elif CFG_SUPPORT_DUAL_CARD_DUAL_DRIVER_B
 #define MMC_FILTER	"mmc0"
 #endif
 
@@ -371,8 +461,6 @@ int mtk_sdio_probe(struct sdio_func *func, const struct sdio_device_id *id)
 		goto out;
 	}
 #endif
-
-	
 
 	sdio_claim_host(func);
 	ret = sdio_enable_func(func);
@@ -431,11 +519,13 @@ static int mtk_sdio_pm_suspend(struct device *pDev)
 	const char *func_id;
 	struct sdio_func *func;
 	P_GLUE_INFO_T prGlueInfo = NULL;
+	P_ADAPTER_T prAdapter;
 
 	DBGLOG(HAL, STATE, "==>\n");
 
 	func = dev_to_sdio_func(pDev);
 	prGlueInfo = sdio_get_drvdata(func);
+	prAdapter = prGlueInfo->prAdapter;
 
 	/* This suspend API could be triggered multiple times.
 	*  Make sure wlanSuspendPmHandle() called once only.
@@ -444,6 +534,22 @@ static int mtk_sdio_pm_suspend(struct device *pDev)
 		wlanSuspendPmHandle(prGlueInfo);
 
 	prGlueInfo->prAdapter->fgForceFwOwn = TRUE;
+
+#if CFG_SUPPORT_WOW_EINT
+	if (prAdapter->rWowlanDevNode.wowlan_irq != 0 &&
+		atomic_read(
+		&(prAdapter->rWowlanDevNode.irq_enable_count)) == 0) {
+		DBGLOG(HAL, ERROR, "%s:enable WIFI IRQ:%d\n", __func__,
+			prAdapter->rWowlanDevNode.wowlan_irq);
+		enable_irq(prAdapter->rWowlanDevNode.wowlan_irq);
+		enable_irq_wake(prAdapter->rWowlanDevNode.wowlan_irq);
+		atomic_inc(&(prAdapter->rWowlanDevNode.irq_enable_count));
+	} else {
+		DBGLOG(HAL, ERROR, "%s:irq_enable count:%d\n", __func__,
+			atomic_read(
+			&(prAdapter->rWowlanDevNode.irq_enable_count)));
+	}
+#endif
 
 	/* Wait for
 	*  1. The other unfinished ownership handshakes
@@ -504,6 +610,9 @@ static int mtk_sdio_pm_resume(struct device *pDev)
 {
 	struct sdio_func *func;
 	P_GLUE_INFO_T prGlueInfo = NULL;
+#if CFG_SUPPORT_WOW_EINT
+	P_ADAPTER_T prAdapter = NULL;
+#endif
 
 	DBGLOG(HAL, STATE, "==>\n");
 
@@ -513,6 +622,23 @@ static int mtk_sdio_pm_resume(struct device *pDev)
 	prGlueInfo->prAdapter->fgForceFwOwn = FALSE;
 
 	wlanResumePmHandle(prGlueInfo);
+
+#if CFG_SUPPORT_WOW_EINT
+	prAdapter = prGlueInfo->prAdapter;
+	if (prAdapter->rWowlanDevNode.wowlan_irq != 0 &&
+		atomic_read(
+		&(prAdapter->rWowlanDevNode.irq_enable_count)) == 1) {
+		DBGLOG(HAL, ERROR, "%s:disable WIFI IRQ:%d\n", __func__,
+			prAdapter->rWowlanDevNode.wowlan_irq);
+		atomic_dec(&(prAdapter->rWowlanDevNode.irq_enable_count));
+		disable_irq_wake(prAdapter->rWowlanDevNode.wowlan_irq);
+			disable_irq(prAdapter->rWowlanDevNode.wowlan_irq);
+	} else {
+		DBGLOG(HAL, ERROR, "%s:irq_enable count:%d\n", __func__,
+			atomic_read(
+			&(prAdapter->rWowlanDevNode.irq_enable_count)));
+	}
+#endif
 
 	DBGLOG(HAL, STATE, "<==\n");
 	return 0;
@@ -567,11 +693,11 @@ int mtk_sdio_async_irq_enable(struct sdio_func *func)
 	func->card->quirks |= MMC_QUIRK_LENIENT_FN0;
 	/* Write CCCR into card */
 	sdio_f0_writeb(func, data, SDIO_CCCR_IRQ_EXT, &ret);
+	func->card->quirks = quirks_bak;
 	if (ret) {
 		DBGLOG(HAL, ERROR, "CCCR 0x%X write fail (%d).\n", SDIO_CCCR_IRQ_EXT, ret);
 		return FALSE;
 	}
-	func->card->quirks = quirks_bak;
 
 	data = sdio_f0_readb(func, SDIO_CCCR_IRQ_EXT, &ret);
 	if (ret || !(data & SDIO_IRQ_EXT_EAI)) {
@@ -830,6 +956,10 @@ INT_32 glBusSetIrq(PVOID pvData, PVOID pfnIsr, PVOID pvCookie)
 	mtk_wcn_hif_sdio_enable_irq(prHifInfo->cltCtx, TRUE);
 #endif
 
+#if CFG_SUPPORT_WOW_EINT
+	mtk_sdio_eint_interrupt(prHifInfo->func);
+#endif
+
 	prHifInfo->fgIsPendingInt = FALSE;
 
 	return ret;
@@ -871,6 +1001,10 @@ VOID glBusFreeIrq(PVOID pvData, PVOID pvCookie)
 	sdio_release_host(prHifInfo->func);
 #else
 	mtk_wcn_hif_sdio_enable_irq(prHifInfo->cltCtx, FALSE);
+#endif
+
+#if CFG_SUPPORT_WOW_EINT
+	mtk_sdio_eint_free_irq(prHifInfo->func);
 #endif
 }				/* end of glBusreeIrq() */
 
@@ -1430,7 +1564,8 @@ VOID kalDevReadIntStatus(IN P_ADAPTER_T prAdapter, OUT PUINT_32 pu4IntStatus)
 #endif /* CFG_SDIO_INTR_ENHANCE */
 
 	if (*pu4IntStatus & ~(WHIER_DEFAULT | WHIER_FW_OWN_BACK_INT_EN)) {
-		DBGLOG(INTR, WARN, "Un-handled HISR %#lx, HISR = %#lx (HIER:0x%lx)\n",
+		DBGLOG(INTR, WARN,
+			"Un-handled HISR %lx, HISR = %lx (HIER:0x%lx)\n",
 		       (*pu4IntStatus & ~WHIER_DEFAULT), *pu4IntStatus, WHIER_DEFAULT);
 		*pu4IntStatus &= WHIER_DEFAULT;
 	}

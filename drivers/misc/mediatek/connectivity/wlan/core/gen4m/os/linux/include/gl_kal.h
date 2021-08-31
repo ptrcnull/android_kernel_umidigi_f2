@@ -266,6 +266,9 @@ enum ENUM_SPIN_LOCK_CATEGORY_E {
 
 	SPIN_LOCK_EHPI_BUS,	/* only for EHPI */
 	SPIN_LOCK_NET_DEV,
+
+	SPIN_LOCK_BSSLIST_FW,
+	SPIN_LOCK_BSSLIST_CFG,
 	SPIN_LOCK_NUM
 };
 
@@ -1589,7 +1592,8 @@ kalChannelFormatSwitch(IN struct cfg80211_chan_def *channel_def,
 		IN struct ieee80211_channel *channel,
 		IN struct RF_CHANNEL_INFO *prRfChnlInfo);
 uint32_t kal_is_skb_gro(struct ADAPTER *prAdapter, uint8_t ucBssIdx);
-void kal_gro_flush(struct ADAPTER *prAdapter, uint8_t ucBssIdx);
+
+void kal_gro_flush(struct ADAPTER *prAdapter, struct net_device *prDev);
 
 int kalExternalAuthRequest(IN struct ADAPTER *prAdapter,
 			   IN uint8_t uBssIndex);

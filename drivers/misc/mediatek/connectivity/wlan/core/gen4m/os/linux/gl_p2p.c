@@ -259,6 +259,13 @@ mtk_cfg80211_default_mgmt_stypes[NUM_NL80211_IFTYPES] = {
 			.tx = 0xffff,
 			.rx = BIT(IEEE80211_STYPE_PROBE_REQ >> 4)
 				| BIT(IEEE80211_STYPE_ACTION >> 4)
+#if CFG_SUPPORT_SOFTAP_WPA3
+				| BIT(IEEE80211_STYPE_ASSOC_REQ >> 4) |
+				  BIT(IEEE80211_STYPE_REASSOC_REQ >> 4) |
+				  BIT(IEEE80211_STYPE_DISASSOC >> 4) |
+				  BIT(IEEE80211_STYPE_AUTH >> 4) |
+				  BIT(IEEE80211_STYPE_DEAUTH >> 4)
+#endif
 			},
 	[NL80211_IFTYPE_AP_VLAN] = {
 			/* copy AP */
@@ -530,27 +537,22 @@ static int p2p_napi_poll(struct napi_struct *napi, int budget)
 /*---------------------------------------------------------------------------*/
 static int p2pInit(struct net_device *prDev)
 {
-	struct GLUE_INFO *prGlueInfo = NULL;
-	uint8_t ucBssIndex;
+
+	struct NETDEV_PRIVATE_GLUE_INFO *prNetDevPrivate = NULL;
 
 	if (!prDev)
 		return -ENXIO;
 
-	prGlueInfo = *((struct GLUE_INFO **) netdev_priv(prDev));
-	ucBssIndex = wlanGetBssIdx(prDev);
-
-	if (ucBssIndex < MAX_BSSID_NUM) {
-		prDev->features |= NETIF_F_GRO;
-		prDev->hw_features |= NETIF_F_GRO;
-		prGlueInfo->napi[ucBssIndex].dev = prDev;
-		netif_napi_add(prGlueInfo->napi[ucBssIndex].dev,
-			&prGlueInfo->napi[ucBssIndex], p2p_napi_poll, 64);
-		DBGLOG(INIT, INFO,
-			"GRO interface add success: %d\n", ucBssIndex);
-	} else {
-		DBGLOG(INIT, ERROR,
-			"invalid BSSID: %d, No GRO interface\n", ucBssIndex);
-	}
+	prNetDevPrivate = (struct NETDEV_PRIVATE_GLUE_INFO *)
+		netdev_priv(prDev);
+	prDev->features |= NETIF_F_GRO;
+	prDev->hw_features |= NETIF_F_GRO;
+	spin_lock_init(&prNetDevPrivate->napi_spinlock);
+	prNetDevPrivate->napi.dev = prDev;
+	netif_napi_add(prNetDevPrivate->napi.dev,
+		&prNetDevPrivate->napi, p2p_napi_poll, 64);
+	DBGLOG(INIT, INFO,
+		"GRO interface added successfully:%p\n", prDev);
 
 	return 0;		/* success */
 }				/* end of p2pInit() */
@@ -1050,7 +1052,8 @@ u_int8_t p2pNetUnregister(struct GLUE_INFO *prGlueInfo,
 		/* Here are the functions which need rtnl_lock */
 		if ((prRoleDev) && (prP2PInfo->prDevHandler != prRoleDev)) {
 			DBGLOG(INIT, INFO, "unregister p2p[%d]\n", ucRoleIdx);
-			unregister_netdev(prRoleDev);
+			if (prRoleDev->reg_state == NETREG_REGISTERED)
+				unregister_netdev(prRoleDev);
 
 			/* This ndev is created in mtk_p2p_cfg80211_add_iface(),
 			 * and unregister_netdev will also free the ndev.
@@ -1058,7 +1061,9 @@ u_int8_t p2pNetUnregister(struct GLUE_INFO *prGlueInfo,
 		}
 
 		DBGLOG(INIT, INFO, "unregister p2pdev[%d]\n", ucRoleIdx);
-		unregister_netdev(prP2PInfo->prDevHandler);
+		if (prP2PInfo->prDevHandler &&
+			prP2PInfo->prDevHandler->reg_state == NETREG_REGISTERED)
+			unregister_netdev(prP2PInfo->prDevHandler);
 
 		if (fgRollbackRtnlLock)
 			rtnl_lock();

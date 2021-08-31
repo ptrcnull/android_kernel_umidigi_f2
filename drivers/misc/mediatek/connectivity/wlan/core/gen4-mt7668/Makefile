@@ -33,7 +33,7 @@ ccflags-y += -DCFG_SUPPORT_TSF_USING_BOOTTIME=1
 ccflags-y += -Werror
 ccflags-y:=$(filter-out -U$(WLAN_CHIP_ID),$(ccflags-y))
 ccflags-y += -DLINUX -D$(WLAN_CHIP_ID)
-
+ccflags-y += -DCFG_SUPPORT_SCHED_SCAN=0
 
 
 #define log level
@@ -42,7 +42,7 @@ CONFIG_MTK_WIFI_MCC_SUPPORT=y
 # Define maximum different channels supported for ieee80211_iface_combination setting.
 CFG_NUM_DIFFERENT_CHANNELS_STA=1
 CFG_NUM_DIFFERENT_CHANNELS_P2P=1
-
+CONFIG_MTK_WPA3_SUPPORT=y
 # Define initial driver running mode.
 # 0=RUNNING_P2P_MODE, 1=RUNNING_AP_MODE, 2=RUNNING_DUAL_AP_MODE, 3=RUNNING_P2P_AP_MODE
 CFG_DRIVER_INITIAL_RUNNING_MODE=0
@@ -77,11 +77,13 @@ ifeq ($(CONFIG_MTK_WPA3_SUPPORT), y)
     ccflags-y += -DCFG_SUPPORT_SAE=1
     ccflags-y += -DCFG_SUPPORT_OWE=1
     ccflags-y += -DCFG_SUPPORT_SUITB=1
+    ccflags-y += -DCFG_SUPPORT_CFG80211_QUEUE=1
 else
     ccflags-y += -DCFG_SUPPORT_CFG80211_AUTH=0
     ccflags-y += -DCFG_SUPPORT_SAE=0
     ccflags-y += -DCFG_SUPPORT_OWE=0
     ccflags-y += -DCFG_SUPPORT_SUITB=0
+    ccflags-y += -DCFG_SUPPORT_CFG80211_QUEUE=0
 endif
 
 # Disable ASSERT() for user load, enable for others
@@ -287,7 +289,9 @@ MGMT_OBJS += $(MGMT_DIR)wapi.o
 
 ifeq ($(CONFIG_MTK_COMBO_WIFI_HIF), sdio)
 HIF_OBJS :=  $(HIF_DIR)arm.o \
-             $(HIF_DIR)sdio.o
+             $(HIF_DIR)sdio.o \
+             $(HIF_DIR)sdio_test_driver_core.o \
+             $(HIF_DIR)sdio_test_driver_ops.o
 else ifeq ($(CONFIG_MTK_COMBO_WIFI_HIF), pcie)
 HIF_OBJS :=  $(HIF_DIR)arm.o \
              $(HIF_DIR)pcie.o

@@ -211,6 +211,7 @@ struct BUS_INFO {
 	void (*getMailboxStatus)(struct ADAPTER *prAdapter, uint32_t *pu4Val);
 	void (*setDummyReg)(struct GLUE_INFO *prGlueInfo);
 	void (*checkDummyReg)(struct GLUE_INFO *prGlueInfo);
+	void (*setPdmaIntMask)(struct GLUE_INFO *prGlueInfo, u_int8_t fgEnable);
 };
 
 

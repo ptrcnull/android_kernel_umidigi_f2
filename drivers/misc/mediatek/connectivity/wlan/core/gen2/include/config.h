@@ -132,6 +132,9 @@
 
 #define CFG_SUPPORT_WAPI			1
 
+/* Enable Detection for 2021 Frag/AGG Attack from WFA */
+#define CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION 1
+
 /*------------------------------------------------------------------------------
  * SLT Option
  *------------------------------------------------------------------------------
@@ -638,6 +641,8 @@
 #define CFG_HOTSPOT_OPTIMIZATION_DTIM           1
 
 #define CFG_AUTO_CHANNEL_SEL_SUPPORT            1
+
+#define CFG_SUPPORT_SOFTAP_WPA3	1
 
 #define CFG_SET_BCN_CAPINFO_BY_DRIVER           0
 

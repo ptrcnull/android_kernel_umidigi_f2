@@ -2670,6 +2670,10 @@ wlanoidSetAddKey(IN struct ADAPTER *prAdapter, IN void *pvSetBuffer,
 			     "[wlan] Not set the peer key while disconnect\n");
 			return WLAN_STATUS_SUCCESS;
 		}
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+		/* clear fragment cache when rekey */
+		nicRxClearFrag(prAdapter, prStaRec);
+#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
 	}
 	prCmdInfo = cmdBufAllocateCmdInfo(prAdapter,
 				(CMD_HDR_SIZE + sizeof(struct CMD_802_11_KEY)));
@@ -2916,6 +2920,9 @@ wlanoidSetAddKey(IN struct ADAPTER *prAdapter, IN void *pvSetBuffer,
 					  prBssInfo->prStaRecOfAP->ucIndex,
 					  prCmdKey->ucAlgorithmId,
 					  prCmdKey->ucKeyId);
+				kalMemCopy(prCmdKey->aucPeerAddr,
+					prBssInfo->prStaRecOfAP->aucMacAddr,
+					MAC_ADDR_LEN);
 			}
 
 			DBGLOG(RSN, INFO, "BIP BC wtbl index:%d\n",
@@ -4884,7 +4891,7 @@ wlanoidQueryMaxLinkSpeed(IN struct ADAPTER *prAdapter,
 	prLinkSpeed = (struct PARAM_LINK_SPEED_EX *)pvQueryBuffer;
 
 	if (kalGetMediaStateIndicated(prAdapter->prGlueInfo, ucBssIndex) !=
-	    PARAM_MEDIA_STATE_CONNECTED) {
+	    PARAM_MEDIA_STATE_CONNECTED || prStaRecOfAP == NULL) {
 		rv = WLAN_STATUS_ADAPTER_NOT_READY;
 	} else {
 		if (kalGetMaxTxRate(prAdapter, prBssInfo, prStaRecOfAP,
@@ -16203,3 +16210,40 @@ wlanoidExternalAuthDone(IN struct ADAPTER *prAdapter,
 
 	return WLAN_STATUS_SUCCESS;
 }
+
+uint32_t
+wlanoidIndicateBssInfo(IN struct ADAPTER *prAdapter,
+			   IN void *pvSetBuffer, IN uint32_t u4SetBufferLen,
+			   OUT uint32_t *pu4SetInfoLen)
+{
+	struct GLUE_INFO *prGlueInfo;
+	struct BSS_DESC **pprBssDesc = NULL;
+	uint32_t rStatus = WLAN_STATUS_SUCCESS;
+	uint8_t i = 0;
+
+	DEBUGFUNC("wlanoidIndicateBssInfo");
+
+	ASSERT(prAdapter);
+
+	prGlueInfo = prAdapter->prGlueInfo;
+	pprBssDesc = &prAdapter->rWifiVar.rScanInfo.rSchedScanParam.
+		     aprPendingBssDescToInd[0];
+
+	for (; i < SCN_SSID_MATCH_MAX_NUM; i++) {
+		if (pprBssDesc[i] == NULL)
+			break;
+		if (pprBssDesc[i]->u2RawLength == 0)
+			continue;
+		kalIndicateBssInfo(prGlueInfo,
+				   (uint8_t *) pprBssDesc[i]->aucRawBuf,
+				   pprBssDesc[i]->u2RawLength,
+				   pprBssDesc[i]->ucChannelNum,
+				   RCPI_TO_dBm(pprBssDesc[i]->ucRCPI));
+	}
+	DBGLOG(SCN, INFO, "pending %d sched scan results\n", i);
+	if (i > 0)
+		kalMemZero(&pprBssDesc[0], i * sizeof(struct BSS_DESC *));
+
+	return rStatus;
+}	/* wlanoidIndicateBssInfo */
+

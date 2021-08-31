@@ -117,9 +117,11 @@
 #define PARAM_PACKET_FILTER_PROMISCUOUS         0x00000020
 #define PARAM_PACKET_FILTER_ALL_LOCAL           0x00000080
 #if CFG_ENABLE_WIFI_DIRECT_CFG_80211
-#define PARAM_PACKET_FILTER_P2P_MASK		0xC0000000
+#define PARAM_PACKET_FILTER_P2P_MASK		0xF0000000
 #define PARAM_PACKET_FILTER_PROBE_REQ		0x80000000
 #define PARAM_PACKET_FILTER_ACTION_FRAME	0x40000000
+#define PARAM_PACKET_FILTER_AUTH		0x20000000
+#define PARAM_PACKET_FILTER_ASSOC_REQ		0x10000000
 #endif
 
 #if CFG_SLT_SUPPORT
@@ -4067,6 +4069,11 @@ uint32_t
 wlanoidExternalAuthDone(IN struct ADAPTER *prAdapter,
 			IN void *pvSetBuffer,
 			IN uint32_t u4SetBufferLen,
+			OUT uint32_t *pu4SetInfoLen);
+
+uint32_t
+wlanoidIndicateBssInfo(IN struct ADAPTER *prAdapter,
+			IN void *pvSetBuffer, IN uint32_t u4SetBufferLen,
 			OUT uint32_t *pu4SetInfoLen);
 
 #endif /* _WLAN_OID_H */

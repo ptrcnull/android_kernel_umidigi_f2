@@ -81,6 +81,8 @@ extern int mtk_wcn_wmt_wlan_reg(
 	struct MTK_WCN_WMT_WLAN_CB_INFO *pWmtWlanCbInfo);
 extern int mtk_wcn_wmt_wlan_unreg(void);
 extern int mtk_wcn_consys_hw_wifi_paldo_ctrl(unsigned int enable);
+extern int mtk_wcn_wmt_mpu_lock_aquire(void);
+extern int mtk_wcn_wmt_mpu_lock_release(void);
 #endif
 
 extern phys_addr_t gWifiRsvMemPhyBase;
@@ -226,6 +228,7 @@ struct BUS_INFO {
 	void (*getMailboxStatus)(struct ADAPTER *prAdapter, uint32_t *pu4Val);
 	void (*setDummyReg)(struct GLUE_INFO *prGlueInfo);
 	void (*checkDummyReg)(struct GLUE_INFO *prGlueInfo);
+	void (*setPdmaIntMask)(struct GLUE_INFO *prGlueInfo, u_int8_t fgEnable);
 };
 
 struct HIF_MEM {

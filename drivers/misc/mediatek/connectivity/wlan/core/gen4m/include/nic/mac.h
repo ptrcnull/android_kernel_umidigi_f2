@@ -1556,6 +1556,8 @@
 /* 7.4.7 Public Action frame details */
 /* 20/40 BSS coexistence */
 #define ACTION_PUBLIC_20_40_COEXIST                 0
+/* 20/40 BSS coexistence */
+#define ACTION_PUBLIC_VENDOR_SPECIFIC               9
 
 #if CFG_SUPPORT_802_11W
 /* SA Query Action frame (IEEE 802.11w/D8.0, 7.4.9) */
@@ -1615,7 +1617,9 @@
 
 /* Epigram IE */
 #define VENDOR_IE_EPIGRAM_OUI                      0x00904c
-#define VENDOR_IE_EPIGRAM_VHTTYPE                  0x0408
+#define VENDOR_IE_EPIGRAM_VHTTYPE1                  0x0400
+#define VENDOR_IE_EPIGRAM_VHTTYPE2                  0x0408
+#define VENDOR_IE_EPIGRAM_VHTTYPE3                  0x0418
 
 #if CFG_SUPPORT_PASSPOINT
 #define VENDOR_OUI_TYPE_HS20                        16

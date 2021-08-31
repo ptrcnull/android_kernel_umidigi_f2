@@ -145,6 +145,43 @@ static PROCESS_RX_MGT_FUNCTION apfnProcessRxMgtFrame[MAX_NUM_OF_FC_SUBTYPES] = {
 };
 #endif
 
+static const struct ACTION_FRAME_SIZE_MAP arActionFrameReservedLen[] = {
+	{(UINT_16)(CATEGORY_QOS_ACTION | ACTION_QOS_MAP_CONFIGURE << 8),
+	 sizeof(struct _ACTION_QOS_MAP_CONFIGURE_FRAME)},
+	{(UINT_16)(CATEGORY_PUBLIC_ACTION | ACTION_PUBLIC_20_40_COEXIST << 8),
+	 OFFSET_OF(ACTION_20_40_COEXIST_FRAME, rChnlReport)},
+	{(UINT_16)
+	 (CATEGORY_PUBLIC_ACTION | ACTION_PUBLIC_VENDOR_SPECIFIC << 8),
+	 sizeof(WLAN_PUBLIC_VENDOR_ACTION_FRAME)},
+	{(UINT_16)(CATEGORY_HT_ACTION | ACTION_HT_NOTIFY_CHANNEL_WIDTH << 8),
+	 sizeof(ACTION_NOTIFY_CHNL_WIDTH_FRAME)},
+	{(UINT_16)(CATEGORY_SA_QUERY_ACTION | ACTION_SA_QUERY_REQUEST << 8),
+	 sizeof(ACTION_SA_QUERY_FRAME)},
+	{(UINT_16)
+	 (CATEGORY_WNM_ACTION | ACTION_WNM_TIMING_MEASUREMENT_REQUEST << 8),
+	 sizeof(ACTION_WNM_TIMING_MEAS_REQ_FRAME)},
+	{(UINT_16)(CATEGORY_SPEC_MGT | ACTION_MEASUREMENT_REQ << 8),
+	 sizeof(ACTION_SM_REQ_FRAME)},
+	{(UINT_16)(CATEGORY_SPEC_MGT | ACTION_MEASUREMENT_REPORT << 8),
+	 sizeof(ACTION_SM_REQ_FRAME)},
+	{(UINT_16)(CATEGORY_SPEC_MGT | ACTION_TPC_REQ << 8),
+	 sizeof(ACTION_SM_REQ_FRAME)},
+	{(UINT_16)(CATEGORY_SPEC_MGT | ACTION_TPC_REPORT << 8),
+	 sizeof(ACTION_SM_REQ_FRAME)},
+	{(UINT_16)(CATEGORY_SPEC_MGT | ACTION_CHNL_SWITCH << 8),
+	 sizeof(ACTION_SM_REQ_FRAME)},
+	{(UINT_16)
+	 (CATEGORY_VHT_ACTION | ACTION_OPERATING_MODE_NOTIFICATION << 8),
+	 sizeof(ACTION_OP_MODE_NOTIFICATION_FRAME)},
+	{(UINT_16)(CATEGORY_RM_ACTION | RM_ACTION_RM_REQUEST << 8),
+	 sizeof(ACTION_RM_REQ_FRAME)},
+	{(UINT_16)(CATEGORY_RM_ACTION | RM_ACTION_REIGHBOR_RESPONSE << 8),
+	 sizeof(struct ACTION_NEIGHBOR_REPORT_FRAME)},
+	{(UINT_16)(CATEGORY_WME_MGT_NOTIFICATION | ACTION_ADDTS_RSP << 8),
+	 sizeof(struct WMM_ACTION_TSPEC_FRAME)},
+	{(UINT_16)(CATEGORY_WME_MGT_NOTIFICATION | ACTION_DELTS << 8),
+	 sizeof(struct WMM_ACTION_TSPEC_FRAME)},
+};
 /*******************************************************************************
 *                                 M A C R O S
 ********************************************************************************
@@ -450,6 +487,33 @@ VOID nicRxFillChksumStatus(IN P_ADAPTER_T prAdapter, IN OUT P_SW_RFB_T prSwRfb, 
 
 /*----------------------------------------------------------------------------*/
 /*!
+ * \brief nicRxClearFrag() is used to clean all fragments in the fragment cache.
+ *
+ * \param[in] prStaRec        The fragment cache is stored under station record.
+ *
+ * @return (none)
+ *
+ */
+/*----------------------------------------------------------------------------*/
+void nicRxClearFrag(IN P_ADAPTER_T prAdapter, IN P_STA_RECORD_T prStaRec)
+{
+	int j;
+	P_FRAG_INFO_T prFragInfo = NULL;
+
+	if (!prAdapter || !prStaRec)
+		return;
+
+	for (j = 0; j < MAX_NUM_CONCURRENT_FRAGMENTED_MSDUS; j++) {
+		prFragInfo = &prStaRec->rFragInfo[j];
+		if (prFragInfo->pr1stFrag) {
+			nicRxReturnRFB(prAdapter, prFragInfo->pr1stFrag);
+			prFragInfo->pr1stFrag = (P_SW_RFB_T)NULL;
+		}
+	}
+}
+
+/*----------------------------------------------------------------------------*/
+/*!
 * \brief Defragment the incoming packets.
 *
 * \param[in] prSWRfb        The RFB which is being processed.
@@ -463,17 +527,22 @@ P_SW_RFB_T nicRxDefragMPDU(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSWRfb, OUT 
 {
 
 	P_SW_RFB_T prOutputSwRfb = (P_SW_RFB_T) NULL;
-#if 1
+#if CFG_SUPPORT_FRAG_SUPPORT
 	P_FRAG_INFO_T prFragInfo;
 	UINT_32 i = 0, j;
-	UINT_16 u2SeqCtrl, u2FrameCtrl;
-	UINT_8 ucFragNum;
+	UINT_16 u2SeqCtrl = 0, u2FrameCtrl = 0, u2SeqNo = 0;
+	UINT_8 ucFragNo = 0;
 	BOOLEAN fgFirst = FALSE;
 	BOOLEAN fgLast = FALSE;
 	OS_SYSTIME rCurrentTime;
 	P_WLAN_MAC_HEADER_T prWlanHeader = NULL;
 	P_HW_MAC_RX_DESC_T prRxStatus = NULL;
 	P_HW_MAC_RX_STS_GROUP_4_T prRxStatusGroup4 = NULL;
+
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+	UINT_8 ucSecMode = CIPHER_SUITE_NONE;
+	UINT_64 u8PN = 0;
+#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
 
 	DEBUGFUNC("nicRx: rxmDefragMPDU\n");
 
@@ -492,12 +561,13 @@ P_SW_RFB_T nicRxDefragMPDU(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSWRfb, OUT 
 		u2FrameCtrl = HAL_RX_STATUS_GET_FRAME_CTL_FIELD(prRxStatusGroup4);
 	}
 	u2SeqCtrl = prSWRfb->u2SequenceControl;
-	ucFragNum = (UINT_8) (u2SeqCtrl & MASK_SC_FRAG_NUM);
+	ucFragNo = (UINT_8) (u2SeqCtrl & MASK_SC_FRAG_NUM);
+	u2SeqNo = u2SeqCtrl >> MASK_SC_SEQ_NUM_OFFSET;
 	prSWRfb->u2FrameCtrl = u2FrameCtrl;
 
 	if (!(u2FrameCtrl & MASK_FC_MORE_FRAG)) {
 		/* The last fragment frame */
-		if (ucFragNum) {
+		if (ucFragNo) {
 			DBGLOG(RX, LOUD,
 			       "FC %04hx M %d SQ %04hx\n",
 			       u2FrameCtrl, !!(u2FrameCtrl & MASK_FC_MORE_FRAG), u2SeqCtrl);
@@ -509,7 +579,7 @@ P_SW_RFB_T nicRxDefragMPDU(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSWRfb, OUT 
 	}
 	/* The fragment frame except the last one */
 	else {
-		if (ucFragNum == 0) {
+		if (ucFragNo == 0) {
 			DBGLOG(RX, LOUD,
 			       "FC %04hx M %d SQ %04hx\n",
 			       u2FrameCtrl, !!(u2FrameCtrl & MASK_FC_MORE_FRAG), u2SeqCtrl);
@@ -522,6 +592,21 @@ P_SW_RFB_T nicRxDefragMPDU(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSWRfb, OUT 
 	}
 
 	GET_CURRENT_SYSTIME(&rCurrentTime);
+
+	/* check cipher suite to set if we need to get PN */
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+	if (HAL_RX_STATUS_GET_SEC_MODE(prRxStatus) == CIPHER_SUITE_TKIP
+		|| HAL_RX_STATUS_GET_SEC_MODE(prRxStatus) == CIPHER_SUITE_TKIP_WO_MIC
+		|| HAL_RX_STATUS_GET_SEC_MODE(prRxStatus) == CIPHER_SUITE_CCMP) {
+		ucSecMode = HAL_RX_STATUS_GET_SEC_MODE(prRxStatus);
+		if (!qmRxPNtoU64(prSWRfb->prRxStatusGroup1->aucPN,
+			CCMPTSCPNNUM, &u8PN)) {
+			DBGLOG(QM, ERROR, "PN2U64 failed\n");
+			/* should not enter here, just fallback */
+			ucSecMode = CIPHER_SUITE_NONE;
+		}
+	}
+#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
 
 	for (j = 0; j < MAX_NUM_CONCURRENT_FRAGMENTED_MSDUS; j++) {
 		prFragInfo = &prSWRfb->prStaRec->rFragInfo[j];
@@ -558,12 +643,24 @@ P_SW_RFB_T nicRxDefragMPDU(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSWRfb, OUT 
 
 			if (RXM_IS_QOS_DATA_FRAME(u2FrameCtrl)) {
 				if (RXM_IS_QOS_DATA_FRAME(prFragInfo->pr1stFrag->u2FrameCtrl)) {
-					if (u2SeqCtrl == prFragInfo->u2NextFragSeqCtrl)
+					if (u2SeqNo == prFragInfo->u2SeqNo
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+						&& ucSecMode == prFragInfo->ucSecMode
+#else
+						&& ucFragNo == prFragInfo->ucNextFragNo
+#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
+						)
 						break;
 				}
 			} else {
 				if (!RXM_IS_QOS_DATA_FRAME(prFragInfo->pr1stFrag->u2FrameCtrl)) {
-					if (u2SeqCtrl == prFragInfo->u2NextFragSeqCtrl)
+					if (u2SeqNo == prFragInfo->u2SeqNo
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+						&& ucSecMode == prFragInfo->ucSecMode
+#else
+						&& ucFragNo == prFragInfo->ucNextFragNo
+#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
+						)
 						break;
 				}
 			}
@@ -583,6 +680,39 @@ P_SW_RFB_T nicRxDefragMPDU(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSWRfb, OUT 
 		return (P_SW_RFB_T) NULL;
 	}
 
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+	if (prFragInfo->pr1stFrag != (P_SW_RFB_T) NULL) {
+		/* check if the FragNo is cont. */
+		if (ucFragNo != prFragInfo->ucNextFragNo
+			|| ((ucSecMode != CIPHER_SUITE_NONE)
+				&& (u8PN != prFragInfo->u8NextPN))
+			) {
+			DBGLOG(RX, INFO, "non-cont FragNo or PN, drop it.");
+
+			DBGLOG(RX, INFO,
+				"SN:%04x NxFragN:%02x FragN:%02x\n",
+				prFragInfo->u2SeqNo,
+				prFragInfo->ucNextFragNo,
+				ucFragNo);
+
+			if (ucSecMode != CIPHER_SUITE_NONE)
+				DBGLOG(RX, INFO,
+					"SN:%04x NxPN:%016x PN:%016x\n",
+					prFragInfo->u2SeqNo,
+					prFragInfo->u8NextPN,
+					u8PN);
+
+			/* discard fragments if FragNo is non-cont. */
+			nicRxReturnRFB(prAdapter, prFragInfo->pr1stFrag);
+			prFragInfo->pr1stFrag = (P_SW_RFB_T) NULL;
+
+			nicRxReturnRFB(prAdapter, prSWRfb);
+			return (P_SW_RFB_T) NULL;
+		}
+	}
+#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
+
+
 	/* retrieve Rx payload */
 	prSWRfb->u2HeaderLen = HAL_RX_STATUS_GET_HEADER_LEN(prRxStatus);
 	prSWRfb->pucPayload = (PUINT_8) (((ULONG) prSWRfb->pvHeader) + prSWRfb->u2HeaderLen);
@@ -600,9 +730,20 @@ P_SW_RFB_T nicRxDefragMPDU(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSWRfb, OUT 
 		prFragInfo->pucNextFragStart =
 		    (PUINT_8) prSWRfb->pucRecvBuff + HAL_RX_STATUS_GET_RX_BYTE_CNT(prRxStatus);
 
-		prFragInfo->u2NextFragSeqCtrl = u2SeqCtrl + 1;
-		DBGLOG(RX, LOUD, "First: nextFragmentSeqCtrl = %04x, u2SeqCtrl = %04x\n",
-		       prFragInfo->u2NextFragSeqCtrl, u2SeqCtrl);
+		prFragInfo->ucNextFragNo = ucFragNo + 1;
+		prFragInfo->u2SeqNo = u2SeqNo;
+
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+		prFragInfo->ucSecMode = ucSecMode;
+		if (prFragInfo->ucSecMode != CIPHER_SUITE_NONE)
+			prFragInfo->u8NextPN = u8PN + 1;
+		else
+			prFragInfo->u8NextPN = 0;
+#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
+
+		DBGLOG(RX, LOUD,
+			   "First: u2SeqCtrl = %04x, u2SeqNo = %d, ucNextFragNo = %d, u8NextPN=%lld\n",
+			   u2SeqCtrl, prFragInfo->u2SeqNo, prFragInfo->ucNextFragNo, prFragInfo->u8NextPN);
 
 		/* prSWRfb->fgFragmented = TRUE; */
 		/* whsu: todo for checksum */
@@ -634,7 +775,12 @@ P_SW_RFB_T nicRxDefragMPDU(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSWRfb, OUT 
 
 				prFragInfo->pucNextFragStart += prSWRfb->u2PayloadLength;
 
-				prFragInfo->u2NextFragSeqCtrl++;
+				prFragInfo->ucNextFragNo++;
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+				if (prFragInfo->ucSecMode != CIPHER_SUITE_NONE)
+					prFragInfo->u8NextPN++;
+#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
+
 			}
 
 			nicRxReturnRFB(prAdapter, prSWRfb);
@@ -644,7 +790,11 @@ P_SW_RFB_T nicRxDefragMPDU(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSWRfb, OUT 
 	/* DBGLOG_MEM8(RXM, INFO, */
 	/* prFragInfo->pr1stFrag->pucPayload, */
 	/* prFragInfo->pr1stFrag->u2PayloadLength); */
-#endif
+#else
+	/* no CFG_SUPPORT_FRAG_SUPPORT, so just free it */
+	nicRxReturnRFB(prAdapter, prSWRfb);
+#endif /* CFG_SUPPORT_FRAG_SUPPORT */
+
 	return prOutputSwRfb;
 }				/* end of rxmDefragMPDU() */
 
@@ -1371,6 +1521,48 @@ VOID nicRxProcessDataPacket(IN P_ADAPTER_T prAdapter, IN OUT P_SW_RFB_T prSwRfb)
 		} else if (HAL_RX_STATUS_IS_LLC_MIS(prRxStatus)) {
 			DBGLOG(RSN, ERROR, "LLC_MIS_ERR\n");
 			fgDrop = TRUE;	/* Drop after send de-auth  */
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+			/*
+			* let qmAmsduAttackDetection check this subframe
+			* before drop it
+			*/
+			if (HAL_RX_STATUS_GET_PAYLOAD_FORMAT(prRxStatus)
+				== RX_PAYLOAD_FORMAT_FIRST_SUB_AMSDU) {
+				fgDrop = FALSE;
+				prSwRfb->fgIsFirstSubAMSDULLCMS = TRUE;
+			}
+#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
+
+		}
+	}
+
+	/* Drop plain text during security connection */
+	if (!fgDrop && HAL_RX_STATUS_IS_CIPHER_MISMATCH(prRxStatus)
+		&& (prSwRfb->fgDataFrame == TRUE)) {
+		PUINT_8 pucData = NULL;
+		UINT_16 u2EtherType = 0;
+
+		DBGLOG(RSN, INFO,
+			"HAL_RX_STATUS_IS_CIPHER_MISMATCH\n");
+
+		nicRxFillRFB(prAdapter, prSwRfb);
+		pucData = (PUINT_8)prSwRfb->pvHeader;
+		if ((prSwRfb->u2PacketLen > ETHER_HEADER_LEN) && pucData) {
+			u2EtherType = (pucData[ETH_TYPE_LEN_OFFSET] << 8)
+					| (pucData[ETH_TYPE_LEN_OFFSET + 1]);
+			if ((u2EtherType == ETH_P_1X)
+#if CFG_SUPPORT_WAPI
+				|| (u2EtherType == ETH_WPI_1X)
+#endif
+			) {
+				fgDrop = FALSE;
+				DBGLOG(RSN, INFO,
+					"Don't drop eapol or wpi packet\n");
+			} else {
+				fgDrop = TRUE;
+				DBGLOG(RSN, INFO,
+					"Drop plain text during security connection\n");
+			}
 		}
 	}
 
@@ -3773,6 +3965,41 @@ WLAN_STATUS nicRxFlush(IN P_ADAPTER_T prAdapter)
 	return WLAN_STATUS_SUCCESS;
 }
 
+UINT_8 nicIsActionFrameValid(IN P_SW_RFB_T prSwRfb)
+{
+	P_WLAN_ACTION_FRAME prActFrame;
+	UINT_16 u2ActionIndex = 0, u2ExpectedLen = 0;
+	UINT_32 u4Idx, u4Size;
+
+	if (prSwRfb->u2PacketLen < sizeof(WLAN_ACTION_FRAME) - 1)
+		return FALSE;
+	prActFrame = (P_WLAN_ACTION_FRAME) prSwRfb->pvHeader;
+
+	DBGLOG(RSN, TRACE, "Action frame category=%d action=%d\n",
+	       prActFrame->ucCategory, prActFrame->ucAction);
+
+	u2ActionIndex = prActFrame->ucCategory | prActFrame->ucAction << 8;
+	u4Size = sizeof(arActionFrameReservedLen) /
+		 sizeof(struct ACTION_FRAME_SIZE_MAP);
+	for (u4Idx = 0; u4Idx < u4Size; u4Idx++) {
+		if (u2ActionIndex == arActionFrameReservedLen[u4Idx].u2Index) {
+			u2ExpectedLen = (UINT_16)
+				arActionFrameReservedLen[u4Idx].len;
+			DBGLOG(RSN, LOUD,
+				"Found expected len of incoming action frame:%d\n",
+				u2ExpectedLen);
+			break;
+		}
+	}
+	if (u2ExpectedLen != 0 && prSwRfb->u2PacketLen < u2ExpectedLen) {
+		DBGLOG(RSN, INFO,
+			"Received an abnormal action frame: packet len/expected len:%d/%d\n",
+			prSwRfb->u2PacketLen, u2ExpectedLen);
+		return FALSE;
+	}
+	return TRUE;
+}
+
 /*----------------------------------------------------------------------------*/
 /*!
 * @brief
@@ -3795,7 +4022,7 @@ WLAN_STATUS nicRxProcessActionFrame(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSw
 
 	DBGLOG(RSN, TRACE, "[Rx] nicRxProcessActionFrame\n");
 
-	if (prSwRfb->u2PacketLen < sizeof(WLAN_ACTION_FRAME) - 1)
+	if (!nicIsActionFrameValid(prSwRfb))
 		return WLAN_STATUS_INVALID_PACKET;
 	prActFrame = (P_WLAN_ACTION_FRAME) prSwRfb->pvHeader;
 
@@ -3840,6 +4067,15 @@ WLAN_STATUS nicRxProcessActionFrame(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSw
 
 		break;
 #endif
+
+#if DSCP_SUPPORT
+	case CATEGORY_QOS_ACTION:
+		DBGLOG(RX, INFO, "received dscp action frame: %d\n",
+			   __LINE__);
+		handleQosMapConf(prAdapter, prSwRfb);
+		break;
+#endif
+
 	case CATEGORY_PUBLIC_ACTION:
 	{
 		UINT_8 ucProcessed = 0;

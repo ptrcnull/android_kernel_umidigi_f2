@@ -2390,6 +2390,17 @@ P_SW_RFB_T qmHandleRxPackets(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfbList
 			}
 		}
 #endif
+
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+		if (qmDetectRxInvalidEAPOL(prAdapter, prCurrSwRfb)) {
+			prCurrSwRfb->eDst = RX_PKT_DESTINATION_NULL;
+			QUEUE_INSERT_TAIL(&rReturnedQue, (P_QUE_ENTRY_T) prCurrSwRfb);
+			DBGLOG(QM, INFO,
+				"drop EAPOL packet not in sec mode\n");
+			continue;
+		}
+#endif
+
 		/* BAR frame */
 		if (HIF_RX_HDR_GET_BAR_FLAG(prHifRxHdr)) {
 			prCurrSwRfb->eDst = RX_PKT_DESTINATION_NULL;
@@ -2452,6 +2463,64 @@ P_SW_RFB_T qmHandleRxPackets(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfbList
 #endif
 
 }
+
+#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+/*----------------------------------------------------------------------------*/
+/*!
+ * \brief qmDetectRxInvalidEAPOL() is used for fake EAPOL checking.
+ *
+ * \param[in] prSwRfb        The RFB which is being processed.
+ *
+ * \return TRUE when we need to drop it
+ */
+/*----------------------------------------------------------------------------*/
+u_int8_t qmDetectRxInvalidEAPOL(IN P_ADAPTER_T prAdapter,
+	IN P_SW_RFB_T prSwRfb)
+{
+	uint8_t *pucPkt = NULL, *pucEthDestAddr = NULL;
+	P_BSS_INFO_T prBssInfo;
+	uint16_t u2EtherType = 0;
+	u_int8_t fgDrop = FALSE;
+	P_STA_RECORD_T prStaRec = NULL;
+
+	if (prSwRfb->u2PacketLen <= ETHER_HEADER_LEN)
+		return FALSE;
+
+	pucPkt = prSwRfb->pvHeader;
+	if (!pucPkt)
+		return FALSE;
+
+	prStaRec = cnmGetStaRecByIndex(prAdapter, prSwRfb->ucStaRecIdx);
+	prBssInfo = &prAdapter->rWifiVar.arBssInfo[prStaRec->ucNetTypeIndex];
+
+	/* return FALSE if OP_MODE is not SAP */
+	if (!IS_BSS_ACTIVE(prBssInfo)
+		|| prBssInfo->eCurrentOPMode != OP_MODE_ACCESS_POINT)
+		return FALSE;
+
+	pucEthDestAddr = pucPkt;
+	u2EtherType = (pucPkt[ETH_TYPE_LEN_OFFSET] << 8)
+			| (pucPkt[ETH_TYPE_LEN_OFFSET + 1]);
+
+	/* return FALSE if EtherType is not EAPOL */
+	if (u2EtherType != ETH_P_1X)
+		return FALSE;
+
+	if (prSwRfb->eDst == RX_PKT_DESTINATION_HOST_WITH_FORWARD
+		|| prSwRfb->eDst == RX_PKT_DESTINATION_FORWARD) {
+		/* fgIsTxKeyReady is set by nicEventAddPkeyDone */
+		if (prStaRec->fgIsTxKeyReady != TRUE)
+			fgDrop = TRUE;
+	}
+
+	DBGLOG(QM, TRACE,
+		"QM: eDst:%d TxKeyReady:%d fgDrop:%d\n",
+		prSwRfb->eDst, prStaRec->fgIsTxKeyReady,
+		fgDrop);
+
+	return fgDrop;
+}
+#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
 
 /*----------------------------------------------------------------------------*/
 /*!
@@ -3709,7 +3778,7 @@ VOID mqmProcessAssocRsp(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfb, IN PUIN
 	UINT_16 u2Offset;
 	PUINT_8 pucIEStart;
 	UINT_8 aucWfaOui[] = VENDOR_OUI_WFA;
-	BOOLEAN hasnoQosMapSetIE = TRUE;
+
 
 	DEBUGFUNC("mqmProcessAssocRsp");
 
@@ -3769,19 +3838,10 @@ VOID mqmProcessAssocRsp(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfb, IN PUIN
 			break;
 		case ELEM_ID_QOS_MAP_SET:
 			DBGLOG(QM, WARN, "QM: received assoc resp qosmapset ie\n");
-			if (prStaRec->qosMapSet)
-				QosMapSetRelease(prStaRec);
-			prStaRec->qosMapSet = qosParseQosMapSet(prAdapter, pucIE);
-			hasnoQosMapSetIE = FALSE;
+			qosParseQosMapSet(prAdapter, prStaRec, pucIE);
 		default:
 			break;
 		}
-	}
-
-	if (hasnoQosMapSetIE) {
-		DBGLOG(QM, WARN, "QM: remove assoc resp qosmapset ie\n");
-		QosMapSetRelease(prStaRec);
-		prStaRec->qosMapSet = NULL;
 	}
 
 	/* Parse AC parameters and write to HW CRs */
@@ -4989,7 +5049,7 @@ VOID qmDetectArpNoResponse(P_ADAPTER_T prAdapter, P_MSDU_INFO_T prMsduInfo)
 	arpOpCode = (pucData[ETH_TYPE_LEN_OFFSET + 8] << 8) | (pucData[ETH_TYPE_LEN_OFFSET + 8 + 1]);
 	if (arpOpCode == ARP_PRO_REQ) {
 		arpMoniter++;
-		if (arpMoniter > 20) {
+		if (arpMoniter > prAdapter->rWifiVar.u4ArpMoniterThreshold) {
 			DBGLOG(INIT, WARN, "IOT Critical issue, arp no resp, check AP!\n");
 			aisBssBeaconTimeout(prAdapter);
 			arpMoniter = 0;

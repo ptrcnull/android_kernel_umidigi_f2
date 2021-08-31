@@ -208,6 +208,11 @@ VOID aisInitializeConnectionSettings(IN P_ADAPTER_T prAdapter, IN P_REG_INFO_T p
 #if CFG_SUPPORT_ROAMING
 	if (prRegInfo)
 		prConnSettings->fgIsEnableRoaming = ((prRegInfo->fgDisRoaming > 0) ? (FALSE) : (TRUE));
+	/*override disable/enable roaming settings by cfg*/
+	if (prAdapter->rWifiVar.fgDisRoaming)
+		prConnSettings->fgIsEnableRoaming = FALSE;
+	else
+		prConnSettings->fgIsEnableRoaming = TRUE;
 #endif /* CFG_SUPPORT_ROAMING */
 
 	prConnSettings->fgIsAdHocQoSEnable = FALSE;
@@ -591,19 +596,8 @@ VOID aisFsmStateInit_JOIN(IN P_ADAPTER_T prAdapter, P_BSS_DESC_T prBssDesc)
 	prJoinReqMsg->ucSeqNum = ++prAisFsmInfo->ucSeqNumOfReqMsg;
 	prJoinReqMsg->prStaRec = prStaRec;
 
-	if (1) {
-		int j;
-		P_FRAG_INFO_T prFragInfo;
+	nicRxClearFrag(prAdapter, prStaRec);
 
-		for (j = 0; j < MAX_NUM_CONCURRENT_FRAGMENTED_MSDUS; j++) {
-			prFragInfo = &prStaRec->rFragInfo[j];
-
-			if (prFragInfo->pr1stFrag) {
-				/* nicRxReturnRFB(prAdapter, prFragInfo->pr1stFrag); */
-				prFragInfo->pr1stFrag = (P_SW_RFB_T) NULL;
-			}
-		}
-	}
 #if CFG_SUPPORT_802_11K
 	rlmSetMaxTxPwrLimit(prAdapter, (prBssDesc->cPowerLimit != RLM_INVALID_POWER_LIMIT) ?
 	prBssDesc->cPowerLimit:RLM_MAX_TX_PWR, 1);
@@ -2773,7 +2767,9 @@ enum _ENUM_AIS_STATE_T aisFsmJoinCompleteAction(IN struct _ADAPTER_T *prAdapter,
 				/* 4 <1.2> Deactivate previous AP's STA_RECORD_T in Driver if have. */
 				if ((prAisBssInfo->prStaRecOfAP) &&
 				    (prAisBssInfo->prStaRecOfAP != prStaRec) &&
-				    (prAisBssInfo->prStaRecOfAP->fgIsInUse)) {
+				    (prAisBssInfo->prStaRecOfAP->fgIsInUse) &&
+				    (prAisBssInfo->prStaRecOfAP->ucBssIndex ==
+				     prAisBssInfo->ucBssIndex)) {
 
 					cnmStaRecChangeState(prAdapter, prAisBssInfo->prStaRecOfAP, STA_STATE_1);
 					cnmStaRecFree(prAdapter, prAisBssInfo->prStaRecOfAP);

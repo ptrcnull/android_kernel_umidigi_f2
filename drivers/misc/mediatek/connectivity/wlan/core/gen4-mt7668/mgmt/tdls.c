@@ -476,7 +476,8 @@ TdlsDataFrameSend_TearDown(ADAPTER_T *prAdapter,
 	/* 1. 802.3 header */
 	kalMemCopy(pPkt, pPeerMac, TDLS_FME_MAC_ADDR_LEN);
 	pPkt += TDLS_FME_MAC_ADDR_LEN;
-	kalMemCopy(pPkt, prAdapter->rMyMacAddr, TDLS_FME_MAC_ADDR_LEN);
+	kalMemCopy(pPkt, prBssInfo->aucOwnMacAddr,
+		   TDLS_FME_MAC_ADDR_LEN);
 	pPkt += TDLS_FME_MAC_ADDR_LEN;
 	*(UINT_16 *) pPkt = htons(TDLS_FRM_PROT_TYPE);
 	pPkt += 2;
@@ -526,9 +527,12 @@ TdlsDataFrameSend_TearDown(ADAPTER_T *prAdapter,
 	TDLS_LINK_IDENTIFIER_IE(pPkt)->ucId = ELEM_ID_LINK_IDENTIFIER;
 	TDLS_LINK_IDENTIFIER_IE(pPkt)->ucLength = 18;
 
-	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aBSSID, prBssInfo->aucBSSID, 6);
-	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aInitiator, prAdapter->rMyMacAddr, 6);
-	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aResponder, pPeerMac, 6);
+	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aBSSID,
+		   prBssInfo->aucBSSID, 6);
+	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aInitiator,
+		   prBssInfo->aucOwnMacAddr, 6);
+	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aResponder,
+		   pPeerMac, 6);
 
 	u4IeLen = IE_SIZE(pPkt);
 	pPkt += u4IeLen;
@@ -599,7 +603,7 @@ TdlsDataFrameSend_SETUP_REQ(ADAPTER_T *prAdapter,
 	/* 1. 802.3 header */
 	kalMemCopy(pPkt, pPeerMac, TDLS_FME_MAC_ADDR_LEN);
 	pPkt += TDLS_FME_MAC_ADDR_LEN;
-	kalMemCopy(pPkt, prAdapter->rMyMacAddr, TDLS_FME_MAC_ADDR_LEN);
+	kalMemCopy(pPkt, prBssInfo->aucOwnMacAddr, TDLS_FME_MAC_ADDR_LEN);
 	pPkt += TDLS_FME_MAC_ADDR_LEN;
 	*(UINT_16 *) pPkt = htons(TDLS_FRM_PROT_TYPE);
 	pPkt += 2;
@@ -727,7 +731,8 @@ TdlsDataFrameSend_SETUP_REQ(ADAPTER_T *prAdapter,
 	TDLS_LINK_IDENTIFIER_IE(pPkt)->ucLength = 18;
 
 	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aBSSID, prBssInfo->aucBSSID, 6);
-	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aInitiator, prAdapter->rMyMacAddr, 6);
+	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aInitiator,
+		prBssInfo->aucOwnMacAddr, 6);
 	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aResponder, pPeerMac, 6);
 
 	u4IeLen = IE_SIZE(pPkt);
@@ -808,7 +813,7 @@ TdlsDataFrameSend_SETUP_RSP(ADAPTER_T *prAdapter,
 	/* 1. 802.3 header */
 	kalMemCopy(pPkt, pPeerMac, TDLS_FME_MAC_ADDR_LEN);
 	pPkt += TDLS_FME_MAC_ADDR_LEN;
-	kalMemCopy(pPkt, prAdapter->rMyMacAddr, TDLS_FME_MAC_ADDR_LEN);
+	kalMemCopy(pPkt, prBssInfo->aucOwnMacAddr, TDLS_FME_MAC_ADDR_LEN);
 	pPkt += TDLS_FME_MAC_ADDR_LEN;
 	*(UINT_16 *) pPkt = htons(TDLS_FRM_PROT_TYPE);
 	pPkt += 2;
@@ -941,8 +946,9 @@ TdlsDataFrameSend_SETUP_RSP(ADAPTER_T *prAdapter,
 	TDLS_LINK_IDENTIFIER_IE(pPkt)->ucLength = 18;
 
 	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aBSSID, prBssInfo->aucBSSID, 6);
-	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aInitiator, pPeerMac, 6);	/* prAdapter->rMyMacAddr */
-	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aResponder, prAdapter->rMyMacAddr, 6);	/* pPeerMac */
+	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aInitiator, pPeerMac, 6);
+	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aResponder,
+		prBssInfo->aucOwnMacAddr, 6);
 
 	u4IeLen = IE_SIZE(pPkt);
 	pPkt += u4IeLen;
@@ -1018,7 +1024,7 @@ TdlsDataFrameSend_CONFIRM(ADAPTER_T *prAdapter,
 	/* 1. 802.3 header */
 	kalMemCopy(pPkt, pPeerMac, TDLS_FME_MAC_ADDR_LEN);
 	pPkt += TDLS_FME_MAC_ADDR_LEN;
-	kalMemCopy(pPkt, prAdapter->rMyMacAddr, TDLS_FME_MAC_ADDR_LEN);
+	kalMemCopy(pPkt, prBssInfo->aucOwnMacAddr, TDLS_FME_MAC_ADDR_LEN);
 	pPkt += TDLS_FME_MAC_ADDR_LEN;
 	*(UINT_16 *) pPkt = htons(TDLS_FRM_PROT_TYPE);
 	pPkt += 2;
@@ -1103,10 +1109,12 @@ TdlsDataFrameSend_CONFIRM(ADAPTER_T *prAdapter,
 	/* 3. Frame Formation - (16) Link identifier element */
 	TDLS_LINK_IDENTIFIER_IE(pPkt)->ucId = ELEM_ID_LINK_IDENTIFIER;
 	TDLS_LINK_IDENTIFIER_IE(pPkt)->ucLength = 18;
-
-	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aBSSID, prBssInfo->aucBSSID, 6);
-	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aInitiator, prAdapter->rMyMacAddr, 6);
-	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aResponder, pPeerMac, 6);
+	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aBSSID,
+		prBssInfo->aucBSSID, 6);
+	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aInitiator,
+		prBssInfo->aucOwnMacAddr, 6);
+	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aResponder,
+		pPeerMac, 6);
 
 	u4IeLen = IE_SIZE(pPkt);
 	pPkt += u4IeLen;
@@ -1398,7 +1406,6 @@ TdlsDataFrameSend_DISCOVERY_REQ(ADAPTER_T *prAdapter,
 	if (ucActionCode != TDLS_FRM_ACTION_DISCOVERY_RSP) {
 		/* 9. Update packet length */
 		prMsduInfo->len = u4PktLen;
-
 		wlanHardStartXmit(prMsduInfo, prMsduInfo->dev);
 	} else {
 		prMsduInfoMgmt->ucPacketType = TX_PACKET_TYPE_MGMT;
@@ -1620,8 +1627,9 @@ TdlsDataFrameSend_DISCOVERY_RSP(ADAPTER_T *prAdapter,
 	TDLS_LINK_IDENTIFIER_IE(pPkt)->ucLength = 18;
 
 	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aBSSID, prBssInfo->aucBSSID, 6);
-	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aInitiator, pPeerMac, 6);	/* prAdapter->rMyMacAddr */
-	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aResponder, prAdapter->rMyMacAddr, 6);	/* pPeerMac */
+	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aInitiator, pPeerMac, 6);
+	kalMemCopy(TDLS_LINK_IDENTIFIER_IE(pPkt)->aResponder,
+		prBssInfo->aucOwnMacAddr, 6);
 
 	u4IeLen = IE_SIZE(pPkt);
 	pPkt += u4IeLen;
@@ -1818,7 +1826,7 @@ VOID tdls_oper_request(struct net_device *dev, const u8 *peer, u16 oper, u16 rea
 
 	/* make up frame content */
 	/* 1. 802.3 header */
-	kalMemCopy(pPkt, prAdapter->rMyMacAddr, TDLS_FME_MAC_ADDR_LEN);
+	kalMemCopy(pPkt, prBssInfo->aucOwnMacAddr, TDLS_FME_MAC_ADDR_LEN);
 	LR_TDLS_FME_FIELD_FILL(TDLS_FME_MAC_ADDR_LEN);
 	kalMemCopy(pPkt, peer, TDLS_FME_MAC_ADDR_LEN);
 	LR_TDLS_FME_FIELD_FILL(TDLS_FME_MAC_ADDR_LEN);

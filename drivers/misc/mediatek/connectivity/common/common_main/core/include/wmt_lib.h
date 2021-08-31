@@ -213,6 +213,7 @@ typedef struct _DEV_WMT_ {
 	OSAL_SLEEPABLE_LOCK idc_lock;
 	OSAL_SLEEPABLE_LOCK wlan_lock;
 	OSAL_SLEEPABLE_LOCK assert_lock;
+	OSAL_SLEEPABLE_LOCK mpu_lock;
 	/* WMTd thread information */
 	/* struct task_struct *pWmtd;   *//* main thread (wmtd) handle */
 	OSAL_THREAD thread;
@@ -407,6 +408,8 @@ extern INT32 wmt_lib_wlan_lock_aquire(VOID);
 extern VOID wmt_lib_assert_lock_release(VOID);
 extern INT32 wmt_lib_assert_lock_trylock(VOID);
 extern INT32 wmt_lib_assert_lock_aquire(VOID);
+extern VOID wmt_lib_mpu_lock_release(VOID);
+extern INT32 wmt_lib_mpu_lock_aquire(VOID);
 extern INT32 wmt_lib_set_stp_wmt_last_close(UINT32 value);
 
 extern VOID wmt_lib_set_patch_num(UINT32 num);
@@ -463,6 +466,7 @@ extern INT32 wmt_lib_set_need_update_patch_version(INT32 need);
 extern VOID wmt_lib_set_bt_link_status(INT32 type, INT32 value);
 VOID mtk_lib_set_mcif_mpu_protection(MTK_WCN_BOOL enable);
 INT32 wmt_lib_resume_dump_info(VOID);
+VOID wmt_lib_set_wlan_mpu_protection(MTK_WCN_BOOL enable);
 /*******************************************************************************
 *                              F U N C T I O N S
 ********************************************************************************

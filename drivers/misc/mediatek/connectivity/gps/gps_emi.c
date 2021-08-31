@@ -428,7 +428,7 @@ static const struct of_device_id apgps_of_ids[] = {
 	{}
 };
 #endif
-__attribute__((unused)) static struct platform_driver gps_emi_driver = {
+static struct platform_driver gps_emi_driver = {
 	.probe = gps_emi_probe,
 	.remove = gps_emi_remove,
 #if defined(CONFIG_PM)
@@ -447,9 +447,9 @@ __attribute__((unused)) static struct platform_driver gps_emi_driver = {
 /*****************************************************************************/
 static int __init gps_emi_mod_init(void)
 {
+	GPS_ERR("gps emi mod register begin");
 	int ret = 0;
 	int err = 0;
-	GPS_ERR("gps emi mod register begin");
 
 	sema_init(&fw_dl_mtx, 1);
 

@@ -767,7 +767,6 @@
 #endif
 
 #define WNM_UNIT_TEST CFG_SUPPORT_802_11V
-
 #define CFG_DRIVER_COMPOSE_ASSOC_REQ        1
 #define CFG_SUPPORT_802_11AC                1
 #define CFG_STRICT_CHECK_CAPINFO_PRIVACY    0
@@ -869,6 +868,11 @@
  *------------------------------------------------------------------------------
  */
 #define CFG_SUPPORT_REPLAY_DETECTION		1
+
+/* Enable Fragment Support */
+#define CFG_SUPPORT_FRAG_SUPPORT 1
+/* Enable Detection for 2021 Frag/AGG Attack from WFA */
+#define CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION	1
 
 /*------------------------------------------------------------------------------
  * Flags of driver delay calibration atfer efuse buffer mode CMD
