@@ -35,6 +35,7 @@
 *                    E X T E R N A L   R E F E R E N C E S
 ********************************************************************************
 */
+#include "queue.h"
 #include "CFG_Wifi_File.h"
 #include "rlm_domain.h"
 
